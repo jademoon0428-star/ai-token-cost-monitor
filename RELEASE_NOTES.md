@@ -129,3 +129,21 @@ Released
 - v1.4-B: added the /api/tasks route (GET returns the active session and task history; POST supports create/start, stop/complete, and stop/abandon).
 - Added the Dashboard Task Session UI: Start Task, Active Task with live elapsed time, Complete Task, Abandon Task, and Task History.
 - Fixed two v1.4-B Task Session lint regressions (react-hooks/set-state-in-effect in app/page.tsx).
+
+---
+
+# AI Cost Management v1.4.1
+
+## Release Status
+Release Preparation
+
+## Version
+1.4.1
+
+## Changes in v1.4.1
+- Core Module Navigation: the five core modules (Usage, Saving, Budget, AI Activity, Efficiency) can now be switched directly from any core module page.
+- Moving between core modules no longer requires passing through the Dashboard.
+- Added a direct Dashboard return entry to /usage/details.
+- Added a direct Dashboard return entry to /usage/import.
+- Existing parent return entries are preserved.
+- No changes to the Dashboard, Task Session, API, database, or installer.
