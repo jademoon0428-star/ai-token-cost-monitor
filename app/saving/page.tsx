@@ -41,6 +41,30 @@ type SavingData = {
     inputTokens: number;
     cachedTokens: number;
   } | null;
+  costConcentration: {
+    currency: string | null;
+    totalVerifiedCost: number;
+    top1: {
+      provider: string | null;
+      model: string | null;
+      cost: number;
+      sharePercent: number;
+    } | null;
+    top2: {
+      combinedCost: number;
+      sharePercent: number;
+    } | null;
+    top3: {
+      combinedCost: number;
+      sharePercent: number;
+    } | null;
+  } | null;
+  efficiencyEvidence: {
+    currency: string | null;
+    costPerMillionTokens: number | null;
+    cacheHitRate: number | null;
+    topModelCostShare: number | null;
+  } | null;
   recommendations: Array<{
     id: string;
     severity: "high" | "medium" | "low";
@@ -86,6 +110,25 @@ function formatMoney(value: number, currency: string | null) {
   return `${value.toFixed(2)} ${currency}`;
 }
 
+function formatEfficiencyMoney(
+  value: number,
+  currency: string | null
+) {
+  if (!Number.isFinite(value)) {
+    return "—";
+  }
+
+  if (!currency) {
+    return value.toFixed(4);
+  }
+
+  if (currency === "CNY") {
+    return `¥${value.toFixed(4)}`;
+  }
+
+  return `${value.toFixed(4)} ${currency}`;
+}
+
 function formatDate(date: string | null) {
   if (!date) {
     return "—";
@@ -125,6 +168,38 @@ function severityStyle(
   return {
     badge: "bg-emerald-100 text-emerald-700",
     icon: "🟢",
+  };
+}
+
+function getCacheEfficiencyStatus(
+  percentage: number
+): { label: string; className: string } {
+  if (
+    !Number.isFinite(percentage)
+  ) {
+    return {
+      label: "Review cache usage",
+      className: "text-amber-600",
+    };
+  }
+
+  if (percentage >= 80) {
+    return {
+      label: "Strong cache usage",
+      className: "text-emerald-600",
+    };
+  }
+
+  if (percentage >= 50) {
+    return {
+      label: "Moderate cache usage",
+      className: "text-amber-600",
+    };
+  }
+
+  return {
+    label: "Review cache usage",
+    className: "text-red-600",
   };
 }
 
@@ -335,6 +410,12 @@ export default function SavingPage() {
   const currency = data.summary.currency;
   const totalCost = data.summary.totalVerifiedCost;
 
+  const cacheStatus = data.cacheEfficiency
+    ? getCacheEfficiencyStatus(
+        data.cacheEfficiency.cachedInputPercentage
+      )
+    : null;
+
   return (
     <main className="min-h-screen bg-slate-50 p-6">
       <div className="mx-auto max-w-6xl space-y-6">
@@ -474,9 +555,13 @@ export default function SavingPage() {
                   %
                 </p>
 
-                <p className="mt-2 text-sm font-medium text-emerald-600">
-                  Strong cache usage
-                </p>
+                {cacheStatus && (
+                  <p
+                    className={`mt-2 text-sm font-medium ${cacheStatus.className}`}
+                  >
+                    {cacheStatus.label}
+                  </p>
+                )}
 
                 <p className="mt-3 text-xs leading-5 text-slate-500">
                   Cached input:{" "}
@@ -491,6 +576,132 @@ export default function SavingPage() {
               </p>
             )}
           </div>
+        </section>
+
+        {/* Cost concentration */}
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <p className="text-sm font-medium text-slate-500">
+            Cost Concentration
+          </p>
+
+          {data.costConcentration ? (
+            <>
+              <div className="mt-4 space-y-3">
+                {data.costConcentration.top1 && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-slate-600">
+                      Top 1 model
+                    </span>
+                    <span className="text-lg font-bold text-slate-900">
+                      {data.costConcentration.top1.sharePercent.toFixed(
+                        1
+                      )}
+                      %
+                    </span>
+                  </div>
+                )}
+
+                {data.costConcentration.top2 && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-slate-600">
+                      Top 2 models
+                    </span>
+                    <span className="text-lg font-bold text-slate-900">
+                      {data.costConcentration.top2.sharePercent.toFixed(
+                        1
+                      )}
+                      %
+                    </span>
+                  </div>
+                )}
+
+                {data.costConcentration.top3 && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-slate-600">
+                      Top 3 models
+                    </span>
+                    <span className="text-lg font-bold text-slate-900">
+                      {data.costConcentration.top3.sharePercent.toFixed(
+                        1
+                      )}
+                      %
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              <p className="mt-4 text-xs leading-5 text-slate-500">
+                Based on verified source-reported costs from the last
+                30 days.
+              </p>
+            </>
+          ) : (
+            <p className="mt-4 text-slate-500">
+              Insufficient verified cost data to show concentration.
+            </p>
+          )}
+        </section>
+
+        {/* Efficiency evidence */}
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <p className="text-sm font-medium text-slate-500">
+            Efficiency evidence
+          </p>
+
+          {data.efficiencyEvidence ? (
+            <>
+              <div className="mt-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-slate-600">
+                    Verified cost per 1M tokens
+                  </span>
+                  <span className="text-lg font-bold text-slate-900">
+                    {formatEfficiencyMoney(
+                      data.efficiencyEvidence.costPerMillionTokens ??
+                        0,
+                      data.efficiencyEvidence.currency
+                    )}
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-slate-600">
+                    Cache hit rate
+                  </span>
+                  <span className="text-lg font-bold text-slate-900">
+                    {(
+                      (data.efficiencyEvidence.cacheHitRate ??
+                        0) * 100
+                    ).toFixed(1)}
+                    %
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-slate-600">
+                    Top model cost share
+                  </span>
+                  <span className="text-lg font-bold text-slate-900">
+                    {(
+                      data.efficiencyEvidence.topModelCostShare ??
+                      0
+                    ).toFixed(1)}
+                    %
+                  </span>
+                </div>
+              </div>
+
+              <p className="mt-4 text-xs leading-5 text-slate-500">
+                Based on verified usage and source-reported costs from
+                the last 30 days.
+              </p>
+            </>
+          ) : (
+            <p className="mt-4 text-slate-500">
+              Efficiency evidence is unavailable for the current verified
+              cost data.
+            </p>
+          )}
         </section>
 
         {/* Spending summary */}

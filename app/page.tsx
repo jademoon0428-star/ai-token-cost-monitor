@@ -28,6 +28,7 @@ type CostResponse = {
   summary?: {
     recordCount?: number;
     visibleRecordCount?: number;
+    sourceCostRecordCount?: number;
     totalSourceCost?: number;
     currency?: string | null;
     monetarySource?: string | null;
@@ -49,6 +50,7 @@ type DashboardData = {
   dailyCost: DailyCost[];
   currency: string | null;
   totalSourceCost: number;
+  sourceCostRecordCount: number;
 };
 
 const TIMEZONE = "Asia/Singapore";
@@ -484,6 +486,13 @@ export default function Dashboard() {
             ? result.summary.totalSourceCost
             : 0;
 
+        const nextSourceCostRecordCount =
+          typeof result.summary
+            ?.sourceCostRecordCount ===
+            "number"
+            ? result.summary.sourceCostRecordCount
+            : 0;
+
         const nextCurrency =
           getCurrency(
             nextRecords,
@@ -500,6 +509,8 @@ export default function Dashboard() {
           currency: nextCurrency,
           totalSourceCost:
             nextTotalSourceCost,
+          sourceCostRecordCount:
+            nextSourceCostRecordCount,
         });
 
         setError(null);
@@ -816,13 +827,12 @@ export default function Dashboard() {
           />
 
           <MetricCard
-            label="Recorded · 30 days"
+            label="Verified records · 30 days"
             value={
               data === null
                 ? "—"
-                : money(
-                    thirtyDayCost,
-                    currency
+                : String(
+                    data.sourceCostRecordCount
                   )
             }
             muted

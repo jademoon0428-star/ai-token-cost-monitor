@@ -8,6 +8,10 @@ import {
   type Period,
 } from "@/lib/services/cost-service";
 
+import {
+  computeEfficiencyInsights,
+} from "@/lib/services/efficiency-service";
+
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -244,6 +248,115 @@ export async function GET(
             totalCachedTokens,
             totalInputTokens
           );
+
+    const costConcentration =
+      totalCost <= 0 ||
+      models.length === 0
+        ? null
+        : {
+            currency,
+            totalVerifiedCost:
+              totalCost,
+            top1: models[0]
+              ? {
+                  provider:
+                    models[0]
+                      .provider,
+                  model:
+                    models[0].model,
+                  cost: models[0]
+                    .sourceCost,
+                  sharePercent:
+                    getPercentage(
+                      models[0]
+                        .sourceCost,
+                      totalCost
+                    ),
+                }
+              : null,
+            top2:
+              models.length >= 2
+                ? {
+                    combinedCost:
+                      models[0]
+                        .sourceCost +
+                      models[1]
+                        .sourceCost,
+                    sharePercent:
+                      getPercentage(
+                        models[0]
+                          .sourceCost +
+                          models[1]
+                            .sourceCost,
+                        totalCost
+                      ),
+                  }
+                : null,
+            top3:
+              models.length >= 3
+                ? {
+                    combinedCost:
+                      models[0]
+                        .sourceCost +
+                      models[1]
+                        .sourceCost +
+                      models[2]
+                        .sourceCost,
+                    sharePercent:
+                      getPercentage(
+                        models[0]
+                          .sourceCost +
+                          models[1]
+                            .sourceCost +
+                          models[2]
+                            .sourceCost,
+                        totalCost
+                      ),
+                  }
+                : null,
+          };
+
+    let efficiencyEvidence: null | {
+      currency: string | null;
+      costPerMillionTokens: number | null;
+      cacheHitRate: number | null;
+      topModelCostShare: number | null;
+    } = null;
+
+    if (
+      costConcentration !== null &&
+      totalCost > 0
+    ) {
+      const insights =
+        computeEfficiencyInsights(
+          data
+        );
+
+      const costPerMillionTokens =
+        insights.cost
+          ?.costPerMillionTokens ??
+        null;
+
+      const cacheHitRate =
+        insights.ratios
+          ?.cacheHitRate ?? null;
+
+      if (
+        currency &&
+        costPerMillionTokens !==
+          null &&
+        cacheHitRate !== null
+      ) {
+        efficiencyEvidence = {
+          currency,
+          costPerMillionTokens,
+          cacheHitRate,
+          topModelCostShare:
+            costConcentration.top1
+              ?.sharePercent ?? null,
+        };
+      }
+    }
 
     const recommendations: Array<{
       id: string;
@@ -509,6 +622,10 @@ export async function GET(
                 totalCachedTokens,
             }
           : null,
+
+      costConcentration,
+
+      efficiencyEvidence,
 
       recommendations,
 

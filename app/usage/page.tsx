@@ -722,8 +722,8 @@ export default async function UsagePage() {
                 </b>
 
                 <span>
-                  Official usage
-                  records
+                  All-time stored
+                  usage records
                 </span>
               </div>
             </div>
