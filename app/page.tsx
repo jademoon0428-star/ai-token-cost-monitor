@@ -704,6 +704,7 @@ export default function Dashboard() {
   }
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadTasks();
   }, []);
 
@@ -711,8 +712,6 @@ export default function Dashboard() {
     if (!hasActiveTask) {
       return;
     }
-
-    setTaskNow(Date.now());
 
     const tick = window.setInterval(
       () => setTaskNow(Date.now()),
