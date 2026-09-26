@@ -1,12 +1,19 @@
 {
   "name": "ai-token-cost-monitor",
-  "version": "0.1.0",
+  "version": "1.1.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start",
-    "lint": "eslint"
+    "start": "node scripts/start-standalone.mjs",
+    "start:desktop": "node desktop/launcher.mjs",
+    "package:desktop": "node scripts/package-desktop.mjs",
+    "lint": "eslint",
+    "smoke:deepseek": "node --experimental-strip-types scripts/deepseek-db-smoke-test.mjs",
+    "import:deepseek": "node scripts/import-deepseek-export.mjs",
+    "sync:deepseek": "node scripts/sync-deepseek.mjs",
+    "cleanup:test-data": "node scripts/cleanup-test-data.mjs",
+    "repair:deepseek-duplicate": "node scripts/repair-deepseek-duplicate-import.mjs"
   },
   "dependencies": {
     "next": "16.3.4",

@@ -1,0 +1,81 @@
+# AI Cost Management v1.0.0
+
+## Release Status
+Release Candidate / Final Freeze
+
+## Product
+AI Cost Management
+
+## Version
+1.0.0
+
+## Platform
+Windows x64
+
+## Installer
+AI-Cost-Management-Setup.exe
+
+## Package
+AI-Cost-Management-Payload.cab
+
+## Installation
+Per-user installation under:
+%LOCALAPPDATA%\AI-Cost-Management\App
+
+## User Data
+%APPDATA%\AI-Cost-Management\data
+
+## Uninstall
+Application files and Start Menu shortcut are removed.
+User cost history/data is preserved.
+
+## Validation
+- Production standalone runtime validated
+- Bundled Node.js runtime validated
+- Installer install validated
+- Application startup validated
+- /api/usage validated
+- /api/ai-activity validated
+- Repeat installation validated
+- Uninstall validated
+- User data preservation validated
+- Database integrity validated
+- No database shipped inside release package
+- No source files shipped inside release package
+
+## Installer SHA256
+
+Setup:
+1F2F02B4A4AC366C05A4EBD194B49403EF12117AB22044262F7D6DA07BCFEFBB
+
+Payload:
+D4E401E81543B853F967D13A41A8D0753A19CF90B7978C9D4DE0678D6E7AB18B
+
+## Known Non-Blockers
+- Installer is currently unsigned.
+- Windows SmartScreen/reputation warnings may appear for an unsigned first release.
+- MSIX is not part of v1.0.0.
+- No formal Apps & Features uninstall registration is included; uninstall.cmd remains the validated developer/test uninstall mechanism.
+
+## Freeze Rule
+After this point, no business-code changes should be made for v1.0.0.
+Any new feature or code change should start a new version/release cycle.
+
+---
+
+# AI Cost Management v1.1.0
+
+## Release Status
+Release Preparation
+
+## Version
+1.1.0
+
+## Changes in v1.1.0
+- DeepSeek official usage export ZIP Import: import the DeepSeek platform's usage-data ZIP directly into the local SQLite database.
+- Preview phase is read-only: parsing and validation write nothing to the database.
+- Confirm phase writes to user data under %APPDATA%\AI-Cost-Management\data\ai-token-cost-monitor.db.
+- Imported records carry `official_export` source and `verified` accuracy semantics.
+- Deterministic record IDs and deduplication make repeat imports safe (skipped duplicates).
+- Usage page gains a persistent "Import official usage export" entry (no longer only a first-run action).
+- The v1.0.0 release remains frozen and unmodified; v1.1.0 is additive to it.

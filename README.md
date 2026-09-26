@@ -1,36 +1,57 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# AI Cost Management
 
-## Getting Started
+A local-first application for monitoring AI spending, tracking usage, and finding opportunities to reduce cost.
 
-First, run the development server:
+## What it does
+
+- **AI spending monitoring** — costs are counted from source-reported data only.
+- **Usage tracking** — inspect model usage records, tokens, and verified costs.
+- **Saving insights** — see where AI spending can be reduced.
+- **Budget monitoring** — set and control AI spending limits.
+- **AI Activity detection** — detect AI-related processes and network activity using local evidence.
+- **Verified cost data / official imported data** — the app labels costs as `verified` / `official_api` when they come from an official source, and never invents costs for services that do not report them.
+
+## Core pages
+
+- **Dashboard** — overview of today's and recent verified spending, cost breakdown by provider/model/day, and attention signals.
+- **Usage** — model, provider, token, and cost usage records, with a full details view and a JSON import tool.
+- **Saving** — where spending can be reduced and why.
+- **Budget** — budget monitoring based on verified cost data.
+- **AI Activity** — local AI process/connection detection and history.
+
+## Data principles
+
+- The application prioritizes **verified, source-reported cost data**.
+- Data imported from official provider exports is labeled `official_export` / `verified` and stored as-is.
+- The app does **not** attempt to calculate the "true" cost of every AI service; when a provider does not report a cost, the data is left as unknown rather than estimated.
+- Savings and budget figures are based on the same verified cost data, so definitions stay consistent across pages.
+
+## Local development
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000) to view the app.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## DeepSeek official export import
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+The official DeepSeek Usage export ZIP can be imported directly into the local SQLite database.
 
-## Learn More
+```bash
+npm run import:deepseek -- "C:\path\to\usage_data_2026-09-05_2026-09-05.zip"
+```
 
-To learn more about Next.js, take a look at the following resources:
+- The importer reads both `cost-*.csv` and `amount-*.csv` files.
+- Imported data is stored as `official_export` / `verified`.
+- Prices are preserved in CNY.
+- The masked API key value present in the export is never imported.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Connectors
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Selected providers can be connected to verify API access and prepare usage synchronization. See the **Connect** page in the app.
 
-## Deploy on Vercel
+## Current status
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+This project is currently in **MVP / local-first** stage. It runs against a local SQLite database and is intended for individual use on a single machine.
