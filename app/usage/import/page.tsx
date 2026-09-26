@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 
 const MAX_ZIP_BYTES = 50 * 1024 * 1024;
@@ -134,6 +135,20 @@ export default function UsageImportPage() {
     <main className="usage-page">
       <div className="usage-top">
         <div>
+          <Link
+            href="/"
+            style={{
+              display: "inline-block",
+              marginBottom: 10,
+              color: "#555",
+              textDecoration: "none",
+              fontSize: 14,
+              fontWeight: 600,
+            }}
+          >
+            ← Dashboard
+          </Link>
+
           <small>MONITOR / USAGE / IMPORT</small>
           <h1>Import usage</h1>
           <p>Import an official DeepSeek usage export ZIP into the local SQLite database.</p>

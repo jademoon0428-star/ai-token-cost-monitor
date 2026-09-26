@@ -1,4 +1,5 @@
 import Link from "next/link";
+import CoreModuleNav from "@/components/core-module-nav";
 import { GET as getUsage } from "@/app/api/usage/route";
 
 export const dynamic = "force-dynamic";
@@ -421,6 +422,8 @@ export default async function UsagePage() {
     <main className="usage-page">
       <div className="usage-top">
         <div>
+          <CoreModuleNav active="usage" />
+
           <small>
             MONITOR / USAGE
           </small>

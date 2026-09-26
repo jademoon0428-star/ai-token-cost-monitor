@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import CoreModuleNav from "@/components/core-module-nav";
 
 type Consumer = {
   pid: number;
@@ -206,6 +207,8 @@ export default function AIActivityPage() {
     <div className="space-y-8 p-8">
       {/* Header */}
       <div>
+        <CoreModuleNav active="ai-activity" />
+
         <div className="flex items-center gap-3">
           <h1 className="text-2xl font-bold">
             AI Activity Monitor

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import CoreModuleNav from "@/components/core-module-nav";
 import { useEffect, useState } from "react";
 
 type BudgetPeriod = "daily" | "weekly" | "monthly";
@@ -458,6 +459,8 @@ export default function BudgetPage() {
         }}
       >
         <div>
+          <CoreModuleNav active="budget" />
+
           <div
             style={{
               marginBottom: 14,

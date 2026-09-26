@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 type UsageRow = {
@@ -423,6 +424,20 @@ export default function UsageDetailsPage() {
     <main className="usage-page">
       <div className="usage-top">
         <div>
+          <Link
+            href="/"
+            style={{
+              display: "inline-block",
+              marginBottom: 10,
+              color: "#555",
+              textDecoration: "none",
+              fontSize: 14,
+              fontWeight: 600,
+            }}
+          >
+            ← Dashboard
+          </Link>
+
           <small>
             MONITOR / USAGE /
             DETAILS

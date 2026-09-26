@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import CoreModuleNav from "@/components/core-module-nav";
 
 type EfficiencyData = {
   success: boolean;
@@ -347,6 +348,8 @@ export default function EfficiencyPage() {
         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
             <div>
+              <CoreModuleNav active="efficiency" />
+
               <div className="flex items-center gap-3">
                 <h1 className="text-3xl font-bold tracking-tight text-slate-900">
                   AI Efficiency
