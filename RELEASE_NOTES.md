@@ -79,3 +79,53 @@ Release Preparation
 - Deterministic record IDs and deduplication make repeat imports safe (skipped duplicates).
 - Usage page gains a persistent "Import official usage export" entry (no longer only a first-run action).
 - The v1.0.0 release remains frozen and unmodified; v1.1.0 is additive to it.
+
+---
+
+# AI Cost Management v1.2.0
+
+## Release Status
+Released
+
+## Version
+1.2.0
+
+## Changes in v1.2.0
+- The Efficiency page now shows per-model efficiency for the selected period.
+- The Efficiency page now shows a day-by-day efficiency table.
+
+---
+
+# AI Cost Management v1.3.0
+
+## Release Status
+Released
+
+## Version
+1.3.0
+
+## Changes in v1.3.0
+- Corrected Dashboard verified-record semantics.
+- Added cost concentration evidence to Saving.
+- Added efficiency evidence to Saving.
+- Added verified Money Layer efficiency metrics to Saving.
+- Improved Usage wording to distinguish all stored records from the selected reporting period.
+- Shipped the v1.3.0 desktop installer package.
+
+---
+
+# AI Cost Management v1.4.0
+
+## Release Status
+Release Preparation
+
+## Version
+1.4.0
+
+## Changes in v1.4.0
+- v1.4-A Task data layer: added tasks, task_sessions, and task_usage_records tables with a partial unique index enforcing a single active task session.
+- Added the Task repository and Task service for task and session lifecycle management.
+- Added an isolated Task smoke test suite (22 checks) that never touches the production or project database.
+- v1.4-B: added the /api/tasks route (GET returns the active session and task history; POST supports create/start, stop/complete, and stop/abandon).
+- Added the Dashboard Task Session UI: Start Task, Active Task with live elapsed time, Complete Task, Abandon Task, and Task History.
+- Fixed two v1.4-B Task Session lint regressions (react-hooks/set-state-in-effect in app/page.tsx).
