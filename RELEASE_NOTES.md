@@ -117,7 +117,7 @@ Released
 # AI Cost Management v1.4.0
 
 ## Release Status
-Release Preparation
+Released
 
 ## Version
 1.4.0
