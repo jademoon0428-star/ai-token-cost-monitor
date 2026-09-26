@@ -60,3 +60,8 @@ data/*.db-wal
 data/*.db
 data/*.db-shm
 data/*.db-wal
+
+# desktop packaging / installer test artifacts
+.desktop-*
+setup.inf
+setup.rpt

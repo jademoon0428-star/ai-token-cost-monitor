@@ -117,6 +117,43 @@ export function initDb() {
       updated_at TEXT NOT NULL
     );
 
+    /*
+     * v1.4-A Task domain.
+     *
+     * A task is a named unit of work. A task session is a bounded
+     * active interval of that task. Usage records are attached to a
+     * session; the task itself never persists a cost, it is always
+     * recomputed from the Money Layer (cost_records) on demand.
+     */
+    CREATE TABLE IF NOT EXISTS tasks (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      status TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS task_sessions (
+      id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL,
+      started_at TEXT NOT NULL,
+      ended_at TEXT,
+      status TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS task_usage_records (
+      id TEXT PRIMARY KEY,
+      task_session_id TEXT NOT NULL,
+      usage_record_id TEXT NOT NULL,
+      attribution_status TEXT NOT NULL DEFAULT 'manual',
+      created_at TEXT NOT NULL,
+      UNIQUE(task_session_id, usage_record_id),
+      FOREIGN KEY(task_session_id) REFERENCES task_sessions(id) ON DELETE CASCADE,
+      FOREIGN KEY(usage_record_id) REFERENCES usage_records(id) ON DELETE CASCADE
+    );
+
     CREATE INDEX IF NOT EXISTS idx_usage_timestamp
       ON usage_records(timestamp);
 
@@ -131,6 +168,23 @@ export function initDb() {
 
     CREATE INDEX IF NOT EXISTS idx_budgets_period
       ON budgets(period);
+
+    CREATE INDEX IF NOT EXISTS idx_task_sessions_task
+      ON task_sessions(task_id);
+
+    CREATE INDEX IF NOT EXISTS idx_task_usage_session
+      ON task_usage_records(task_session_id);
+
+    CREATE INDEX IF NOT EXISTS idx_task_usage_usage
+      ON task_usage_records(usage_record_id);
+
+    /*
+     * Global invariant: at most one task session may be active at
+     * any time. Enforced in the database itself.
+     */
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_task_sessions_one_active
+      ON task_sessions(status)
+      WHERE status = 'active';
   `);
 
   migrateBudgetsTable(db);

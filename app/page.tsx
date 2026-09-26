@@ -53,6 +53,36 @@ type DashboardData = {
   sourceCostRecordCount: number;
 };
 
+type TaskSessionState = {
+  task: {
+    id: string;
+    name: string;
+    status: string;
+  } | null;
+  session: {
+    id: string;
+    task_id: string;
+    started_at: string | null;
+    ended_at: string | null;
+    status: string;
+  };
+};
+
+type TaskHistoryRow = {
+  task_id: string;
+  task_name: string;
+  task_created_at: string;
+  session_id: string | null;
+  session_started_at: string | null;
+  session_ended_at: string | null;
+  session_status: string | null;
+};
+
+type TaskStatePayload = {
+  active: TaskSessionState | null;
+  history: TaskHistoryRow[];
+};
+
 const TIMEZONE = "Asia/Singapore";
 const REQUEST_TIMEOUT_MS = 10000;
 
@@ -400,6 +430,50 @@ function formatDay(date: string): string {
   }).format(new Date(`${date}T12:00:00`));
 }
 
+function formatTaskElapsed(
+  startedAt: string | null,
+  endedAt: string | null | undefined,
+  nowMs: number
+): string {
+  if (!startedAt) {
+    return "—";
+  }
+
+  const startMs = new Date(startedAt).getTime();
+  const endMs = endedAt
+    ? new Date(endedAt).getTime()
+    : nowMs;
+
+  const totalSeconds = Math.max(
+    0,
+    Math.floor((endMs - startMs) / 1000)
+  );
+
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor(
+    (totalSeconds % 3600) / 60
+  );
+  const seconds = totalSeconds % 60;
+
+  const pad = (value: number) =>
+    String(value).padStart(2, "0");
+
+  return `${hours}h ${pad(minutes)}m ${pad(seconds)}s`;
+}
+
+function formatTaskTime(iso: string): string {
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: TIMEZONE,
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).format(new Date(iso));
+}
+
 export default function Dashboard() {
   const [data, setData] =
     useState<DashboardData | null>(null);
@@ -551,6 +625,170 @@ export default function Dashboard() {
       active = false;
     };
   }, []);
+
+  // ---- Task Session state (v1.4-B) --------------------------------------
+
+  const [taskData, setTaskData] =
+    useState<TaskStatePayload | null>(
+      null
+    );
+
+  const [taskLoading, setTaskLoading] =
+    useState(true);
+
+  const [taskError, setTaskError] =
+    useState<string | null>(null);
+
+  const [taskName, setTaskName] =
+    useState("");
+
+  const [taskBusy, setTaskBusy] =
+    useState(false);
+
+  const [taskNow, setTaskNow] =
+    useState(() => Date.now());
+
+  const hasActiveTask = Boolean(
+    taskData?.active
+  );
+
+  async function loadTasks() {
+    try {
+      const response = await fetch(
+        "/api/tasks",
+        {
+          method: "GET",
+          cache: "no-store",
+          headers: {
+            Accept: "application/json",
+          },
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          `HTTP ${response.status}`
+        );
+      }
+
+      const payload =
+        (await response.json()) as Partial<TaskStatePayload> & {
+          success: boolean;
+        };
+
+      if (!payload.success) {
+        throw new Error(
+          "Tasks API returned success=false."
+        );
+      }
+
+      setTaskData({
+        active:
+          payload.active ?? null,
+        history:
+          Array.isArray(payload.history)
+            ? payload.history
+            : [],
+      });
+
+      setTaskError(null);
+    } catch (err) {
+      setTaskError(
+        err instanceof Error
+          ? err.message
+          : "Failed to load task state."
+      );
+    } finally {
+      setTaskLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void loadTasks();
+  }, []);
+
+  useEffect(() => {
+    if (!hasActiveTask) {
+      return;
+    }
+
+    setTaskNow(Date.now());
+
+    const tick = window.setInterval(
+      () => setTaskNow(Date.now()),
+      1000
+    );
+
+    return () => {
+      window.clearInterval(tick);
+    };
+  }, [hasActiveTask]);
+
+  async function runTaskAction(
+    body: Record<string, unknown>
+  ) {
+    if (taskBusy) {
+      return;
+    }
+
+    setTaskBusy(true);
+    setTaskError(null);
+
+    try {
+      const response = await fetch(
+        "/api/tasks",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type":
+              "application/json",
+          },
+          body: JSON.stringify(body),
+          cache: "no-store",
+        }
+      );
+
+      const payload = (await response
+        .json()
+        .catch(() => null)) as {
+        error?: string;
+      } | null;
+
+      if (!response.ok) {
+        setTaskError(
+          payload?.error
+            ? String(payload.error)
+            : `HTTP ${response.status}`
+        );
+
+        return;
+      }
+
+      await loadTasks();
+    } catch (err) {
+      setTaskError(
+        err instanceof Error
+          ? err.message
+          : "Task action failed."
+      );
+    } finally {
+      setTaskBusy(false);
+    }
+  }
+
+  function handleStartTask() {
+    const name = taskName.trim();
+
+    if (!name || taskBusy) {
+      return;
+    }
+
+    setTaskName(name);
+    void runTaskAction({
+      action: "create/start",
+      name,
+    });
+  }
 
   const records = useMemo(
     () => data?.records ?? [],
@@ -861,6 +1099,311 @@ export default function Dashboard() {
             estimated.
           </section>
         )}
+
+        <section
+          style={{
+            background: "#ffffff",
+            borderRadius: "16px",
+            border:
+              "1px solid #e7ebf0",
+            padding: "22px",
+            marginBottom: "20px",
+          }}
+        >
+          <SectionHeading
+            title="Task Session"
+            subtitle="Track focused AI work sessions. Only one task session can be active at a time."
+          />
+
+          {taskError && (
+            <div
+              style={{
+                background: "#fff7ed",
+                border:
+                  "1px solid #fed7aa",
+                color: "#9a3412",
+                borderRadius: "12px",
+                padding:
+                  "12px 15px",
+                marginBottom: "16px",
+                fontSize: "13px",
+              }}
+            >
+              {taskError}
+            </div>
+          )}
+
+          {taskLoading ? (
+            <EmptyState text="Loading task session state..." />
+          ) : taskData?.active ? (
+            <div
+              style={{
+                background: "#f8fafc",
+                borderRadius: "12px",
+                border:
+                  "1px solid #edf1f5",
+                padding: "16px",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent:
+                    "space-between",
+                  alignItems:
+                    "flex-start",
+                  gap: "12px",
+                  marginBottom: "10px",
+                }}
+              >
+                <div
+                  style={{
+                    minWidth: 0,
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: "11px",
+                      color: "#94a3b8",
+                      fontWeight: 700,
+                      textTransform:
+                        "uppercase",
+                      letterSpacing:
+                        "0.05em",
+                      marginBottom:
+                        "5px",
+                    }}
+                  >
+                    Active task
+                  </div>
+
+                  <strong
+                    style={{
+                      fontSize: "16px",
+                      overflow:
+                        "hidden",
+                      textOverflow:
+                        "ellipsis",
+                      display: "block",
+                    }}
+                  >
+                    {taskData.active.task
+                      ?.name ??
+                      "Unknown task"}
+                  </strong>
+                </div>
+
+                <TaskStatusBadge
+                  status={
+                    taskData.active
+                      .session.status
+                  }
+                />
+              </div>
+
+              <div
+                style={{
+                  fontSize: "13px",
+                  color: "#64748b",
+                  marginBottom: "14px",
+                }}
+              >
+                Elapsed:{" "}
+                <strong
+                  style={{
+                    color: "#172033",
+                  }}
+                >
+                  {formatTaskElapsed(
+                    taskData.active
+                      .session.started_at,
+                    taskData.active
+                      .session.ended_at,
+                    taskNow
+                  )}
+                </strong>
+              </div>
+
+              <div
+                style={{
+                  display: "flex",
+                  gap: "10px",
+                }}
+              >
+                <button
+                  type="button"
+                  className="export"
+                  style={{
+                    borderRadius: "8px",
+                    padding:
+                      "10px 14px",
+                    fontSize: "12px",
+                    fontWeight: 750,
+                  }}
+                  disabled={taskBusy}
+                  onClick={() =>
+                    void runTaskAction(
+                      {
+                        action:
+                          "stop/complete",
+                        session_id:
+                          taskData
+                            ?.active
+                            ?.session
+                            .id,
+                      }
+                    )
+                  }
+                >
+                  {taskBusy
+                    ? "Saving..."
+                    : "Complete Task"}
+                </button>
+
+                <button
+                  type="button"
+                  style={{
+                    border:
+                      "1px solid #e7ebf0",
+                    background:
+                      "#ffffff",
+                    borderRadius: "8px",
+                    padding:
+                      "10px 14px",
+                    fontSize: "12px",
+                    fontWeight: 750,
+                    color: "#667085",
+                  }}
+                  disabled={taskBusy}
+                  onClick={() =>
+                    void runTaskAction(
+                      {
+                        action:
+                          "stop/abandon",
+                        session_id:
+                          taskData
+                            ?.active
+                            ?.session
+                            .id,
+                      }
+                    )
+                  }
+                >
+                  {taskBusy
+                    ? "Saving..."
+                    : "Abandon Task"}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div
+              style={{
+                display: "flex",
+                gap: "10px",
+                alignItems: "center",
+              }}
+            >
+              <input
+                type="text"
+                value={taskName}
+                onChange={(event) =>
+                  setTaskName(
+                    event.target
+                      .value
+                  )
+                }
+                onKeyDown={(event) => {
+                  if (
+                    event.key ===
+                      "Enter" &&
+                    taskName.trim() &&
+                    !taskBusy
+                  ) {
+                    handleStartTask();
+                  }
+                }}
+                placeholder="Task name"
+                disabled={taskBusy}
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  border:
+                    "1px solid #e7ebf0",
+                  borderRadius: "8px",
+                  padding:
+                    "10px 12px",
+                  fontSize: "13px",
+                  outline: "none",
+                  fontFamily: "inherit",
+                }}
+              />
+
+              <button
+                type="button"
+                className="export"
+                style={{
+                  borderRadius: "8px",
+                  padding:
+                    "10px 14px",
+                  fontSize: "12px",
+                  fontWeight: 750,
+                }}
+                disabled={
+                  taskBusy ||
+                  !taskName.trim()
+                }
+                onClick={
+                  handleStartTask
+                }
+              >
+                {taskBusy
+                  ? "Starting..."
+                  : "Start Task"}
+              </button>
+            </div>
+          )}
+
+          <div
+            style={{
+              marginTop: "22px",
+              marginBottom: "12px",
+              fontSize: "14px",
+              fontWeight: 750,
+            }}
+          >
+            Task History
+          </div>
+
+          {!taskLoading &&
+          taskData &&
+          taskData.history.length ===
+            0 ? (
+            <EmptyState text="No task sessions yet." />
+          ) : (
+            <div
+              style={{
+                border:
+                  "1px solid #edf1f5",
+                borderRadius: "12px",
+                overflow: "hidden",
+              }}
+            >
+              {(taskData?.history ??
+                []).map(
+                (row, index) => (
+                  <TaskHistoryListItem
+                    key={
+                      row.session_id ??
+                      `${row.task_id}-${index}`
+                    }
+                    row={row}
+                    nowMs={taskNow}
+                  />
+                )
+              )}
+            </div>
+          )}
+        </section>
 
         <section
           style={{
@@ -1780,6 +2323,191 @@ function EmptyState({
       {action ? (
         <div style={{ marginTop: "12px" }}>{action}</div>
       ) : null}
+    </div>
+  );
+}
+
+function TaskStatusBadge({
+  status,
+}: {
+  status: string | null;
+}) {
+  const isActive = status === "active";
+
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "6px",
+        background: isActive
+          ? "#e7f6ec"
+          : status === "completed"
+          ? "#eef2f7"
+          : "#f6f8fb",
+        color: isActive
+          ? "#067647"
+          : status === "completed"
+          ? "#344054"
+          : "#667085",
+        borderRadius: "999px",
+        padding: "5px 11px",
+        fontSize: "11px",
+        fontWeight: 700,
+        flex: "0 0 auto",
+      }}
+    >
+      <span
+        style={{
+          width: "6px",
+          height: "6px",
+          borderRadius: "999px",
+          background: isActive
+            ? "#12b76a"
+            : "#98a2b3",
+        }}
+      />
+
+      {isActive
+        ? "Active"
+        : status === "completed"
+        ? "Completed"
+        : status === "abandoned"
+        ? "Abandoned"
+        : "No session"}
+    </span>
+  );
+}
+
+function TaskHistoryListItem({
+  row,
+  nowMs,
+}: {
+  row: TaskHistoryRow;
+  nowMs: number;
+}) {
+  const hasSession = Boolean(
+    row.session_id
+  );
+
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns:
+          hasSession
+            ? "minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr) 110px"
+            : "minmax(0, 1.2fr) minmax(0, 1fr)",
+        gap: "12px",
+        padding: "13px 16px",
+        borderBottom:
+          "1px solid #edf1f5",
+        alignItems: "center",
+        background: "#ffffff",
+      }}
+    >
+      <div
+        style={{
+          minWidth: 0,
+        }}
+      >
+        <div
+          style={{
+            fontSize: "13px",
+            fontWeight: 700,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {row.task_name}
+        </div>
+
+        <div
+          style={{
+            fontSize: "11px",
+            color: "#94a3b8",
+            marginTop: "2px",
+          }}
+        >
+          Task created{" "}
+          {formatTaskTime(
+            row.task_created_at
+          )}
+        </div>
+      </div>
+
+      {hasSession ? (
+        <>
+          <div
+            style={{
+              minWidth: 0,
+              fontSize: "12px",
+              color: "#475467",
+            }}
+          >
+            {formatTaskTime(
+              row
+                .session_started_at as string
+            )}
+          </div>
+
+          <div
+            style={{
+              minWidth: 0,
+              fontSize: "12px",
+              color: "#475467",
+            }}
+          >
+            {row.session_ended_at
+              ? formatTaskTime(
+                  row.session_ended_at
+                )
+              : "—"}
+          </div>
+
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+              justifyContent:
+                "flex-end",
+            }}
+          >
+            <span
+              style={{
+                fontSize: "12px",
+                color: "#172033",
+                whiteSpace:
+                  "nowrap",
+              }}
+            >
+              {formatTaskElapsed(
+                row
+                  .session_started_at,
+                row.session_ended_at,
+                nowMs
+              )}
+            </span>
+
+            <TaskStatusBadge
+              status={
+                row.session_status
+              }
+            />
+          </div>
+        </>
+      ) : (
+        <div
+          style={{
+            fontSize: "12px",
+            color: "#98a2b3",
+          }}
+        >
+          No session yet
+        </div>
+      )}
     </div>
   );
 }
