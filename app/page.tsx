@@ -1833,6 +1833,12 @@ export default function Dashboard() {
             description="Measure AI token and cost efficiency."
             href="/efficiency"
           />
+
+          <ActionCard
+            title="AI Project Planner"
+            description="Plan your AI work before you start."
+            href="/planner"
+          />
         </section>
 
         <footer
