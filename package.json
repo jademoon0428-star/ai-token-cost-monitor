@@ -11,6 +11,8 @@
     "lint": "eslint",
     "smoke:deepseek": "node --experimental-strip-types scripts/deepseek-db-smoke-test.mjs",
     "smoke:tasks": "node --experimental-strip-types scripts/smoke-tasks.mjs",
+    "smoke:registry": "node --experimental-strip-types scripts/smoke-registry.mjs",
+    "seed:registry": "node --experimental-strip-types scripts/seed-ai-registry.mjs",
     "import:deepseek": "node scripts/import-deepseek-export.mjs",
     "sync:deepseek": "node scripts/sync-deepseek.mjs",
     "cleanup:test-data": "node scripts/cleanup-test-data.mjs",

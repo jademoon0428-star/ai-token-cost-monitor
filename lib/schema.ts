@@ -154,6 +154,65 @@ export function initDb() {
       FOREIGN KEY(usage_record_id) REFERENCES usage_records(id) ON DELETE CASCADE
     );
 
+    /*
+     * v1.4-B AI Registry (infrastructure only).
+     *
+     * ai_model_capabilities holds one row per model with strictly
+     * tri-state capability facts. NULL means Unknown: no official
+     * vendor statement was found. 0 means the vendor documents the
+     * capability as unsupported. 1 means the vendor documents it as
+     * supported.
+     *
+     * There are deliberately no score, rank, tier, weight or
+     * confidence columns. The registry records what a vendor says
+     * about its own model; it never rates or ranks models.
+     *
+     * source_url / source_checked_at keep every fact traceable back
+     * to the vendor page it was read from.
+     */
+    CREATE TABLE IF NOT EXISTS ai_model_capabilities (
+      model_id TEXT PRIMARY KEY,
+      supports_tools INTEGER CHECK(
+        supports_tools IN (0, 1)
+      ),
+      supports_vision INTEGER CHECK(
+        supports_vision IN (0, 1)
+      ),
+      supports_reasoning INTEGER CHECK(
+        supports_reasoning IN (0, 1)
+      ),
+      context_window_tokens INTEGER,
+      max_output_tokens INTEGER,
+      source_url TEXT NOT NULL,
+      source_checked_at TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(model_id) REFERENCES models(id) ON DELETE CASCADE
+    );
+
+    /*
+     * v1.4-B user_ai_tools.
+     *
+     * A user-declared inventory of the AI tools the user runs
+     * (for example a CLI agent or an IDE extension), so usage can
+     * later be attributed to a tool.
+     *
+     * This table intentionally stores NO api_key / token /
+     * credential / secret column. Credentials are never persisted
+     * in this database.
+     */
+    CREATE TABLE IF NOT EXISTS user_ai_tools (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      category TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'active' CHECK(
+        status IN ('active', 'archived')
+      ),
+      notes TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_usage_timestamp
       ON usage_records(timestamp);
 
@@ -177,6 +236,15 @@ export function initDb() {
 
     CREATE INDEX IF NOT EXISTS idx_task_usage_usage
       ON task_usage_records(usage_record_id);
+
+    CREATE INDEX IF NOT EXISTS idx_user_ai_tools_status
+      ON user_ai_tools(status);
+
+    CREATE INDEX IF NOT EXISTS idx_user_ai_tools_category
+      ON user_ai_tools(category);
+
+    CREATE INDEX IF NOT EXISTS idx_pricing_provider_model
+      ON pricing_versions(provider_id, model);
 
     /*
      * Global invariant: at most one task session may be active at
