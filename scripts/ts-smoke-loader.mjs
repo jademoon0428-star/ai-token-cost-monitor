@@ -75,5 +75,27 @@ export async function resolve(specifier, context, nextResolve) {
     }
   }
 
+  if (
+    specifier === "next/server"
+  ) {
+    /*
+     * next@16 ships server.js without an "exports" map, so plain
+     * Node cannot resolve the extensionless "next/server" specifier
+     * that the App Router route files import. Point it at the real
+     * file so smoke tests can exercise the actual route handlers.
+     */
+    return nextResolve(
+      pathToFileURL(
+        path.join(
+          root,
+          "node_modules",
+          "next",
+          "server.js"
+        )
+      ).href,
+      context
+    );
+  }
+
   return nextResolve(specifier, context);
 }

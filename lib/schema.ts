@@ -213,6 +213,200 @@ export function initDb() {
       updated_at TEXT NOT NULL
     );
 
+    /*
+     * v1.4-C AI Project Planner (data layer only).
+     *
+     * Everything in this block is PLANNED data: intent, estimates and
+     * user decisions. It is never a measurement. No Planner table
+     * writes to usage_records or cost_records, and actual spend is
+     * still only ever read from the Money Layer.
+     *
+     * Two hard rules apply to every nullable money/token column
+     * below:
+     *
+     * - NULL means "unknown / not estimated". It never means zero.
+     *   A missing budget is three NULL columns, never 0, and never an
+     *   implicit USD.
+     * - No currency conversion happens anywhere in this schema. Two
+     *   options priced in CNY and USD simply stay in their own
+     *   currency and are never summed together.
+     *
+     * There are deliberately no score / rank / tier / weight /
+     * confidence / quality columns anywhere in the Planner: the
+     * Planner records what the user asked for and what each option
+     * was estimated to cost, it never rates models.
+     */
+
+    /*
+     * A project is one body of work the user wants to plan.
+     */
+    CREATE TABLE IF NOT EXISTS projects (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      goal TEXT,
+      description TEXT,
+      preference TEXT NOT NULL DEFAULT 'balanced' CHECK(
+        preference IN (
+          'cost_first',
+          'time_first',
+          'balanced'
+        )
+      ),
+      budget_min_micros INTEGER,
+      budget_max_micros INTEGER,
+      budget_currency TEXT,
+      deadline_days INTEGER,
+      status TEXT NOT NULL DEFAULT 'planning' CHECK(
+        status IN (
+          'planning',
+          'active',
+          'completed',
+          'abandoned'
+        )
+      ),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    /*
+     * A plan is one version of the approach for a project. Versions
+     * are immutable rows; a new version is a new row, never an
+     * update of an old one.
+     */
+    CREATE TABLE IF NOT EXISTS project_plans (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      version INTEGER NOT NULL DEFAULT 1,
+      strategy TEXT NOT NULL CHECK(
+        strategy IN (
+          'cost_first',
+          'time_first',
+          'balanced'
+        )
+      ),
+      summary TEXT,
+      created_at TEXT NOT NULL,
+      UNIQUE(project_id, version),
+      FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+    );
+
+    /*
+     * A planned step of a plan.
+     *
+     * task_id is the ONLY link to the existing execution layer. It
+     * points at an existing tasks row once the user actually starts
+     * the step, and it is set to NULL if that task is later deleted.
+     * There is deliberately no task_session_id here: one planned step
+     * may produce many execution sessions over its life, and sessions
+     * remain owned by the existing Task Session layer.
+     *
+     * estimated_*_tokens are the user's or the Planner's estimate of
+     * the step, NOT a measurement, and NOT a cost. Cost and time live
+     * in project_task_ai_options.
+     *
+     * required_capabilities is a JSON array stored as TEXT, e.g.
+     * '["vision","tools"]'. It is plain text on purpose: no JSON
+     * extension or third-party driver is required to read or write
+     * it.
+     */
+    CREATE TABLE IF NOT EXISTS project_tasks (
+      id TEXT PRIMARY KEY,
+      plan_id TEXT NOT NULL,
+      task_id TEXT,
+      sequence INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      category TEXT NOT NULL CHECK(
+        category IN (
+          'planning',
+          'architecture',
+          'research',
+          'ui_design',
+          'coding',
+          'debugging',
+          'testing',
+          'documentation',
+          'review',
+          'deployment'
+        )
+      ),
+      complexity TEXT NOT NULL CHECK(
+        complexity IN (
+          'low',
+          'medium',
+          'high'
+        )
+      ),
+      description TEXT,
+      required_capabilities TEXT,
+      estimated_input_tokens_min INTEGER,
+      estimated_input_tokens_max INTEGER,
+      estimated_output_tokens_min INTEGER,
+      estimated_output_tokens_max INTEGER,
+      status TEXT NOT NULL DEFAULT 'planned' CHECK(
+        status IN (
+          'planned',
+          'in_progress',
+          'done',
+          'skipped'
+        )
+      ),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(plan_id, sequence),
+      FOREIGN KEY(plan_id) REFERENCES project_plans(id) ON DELETE CASCADE,
+      FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE SET NULL
+    );
+
+    /*
+     * One candidate way of running a planned step: a model, an
+     * optional user tool, and the estimated cost and time.
+     *
+     * The Planner never picks one of these. is_selected is set only
+     * by an explicit user decision, and selecting one option clears
+     * the others for the same planned step.
+     *
+     * fit_status is a plain three-state fact about whether this
+     * model/tool pair can actually run the planned step, judged
+     * against that step's own required_capabilities and complexity:
+     * 'meets', 'below_minimum' (some required capability is missing)
+     * or 'unknown' (not determined). It says nothing about budget,
+     * price or deadline, and it is never a score: options are not
+     * ordered by it and nothing is ranked or recommended from it.
+     *
+     * cost_min_micros / cost_max_micros / cost_currency are all NULL
+     * together when the price is unknown. Unknown is never written
+     * as 0 and never as an assumed USD.
+     */
+    CREATE TABLE IF NOT EXISTS project_task_ai_options (
+      id TEXT PRIMARY KEY,
+      project_task_id TEXT NOT NULL,
+      model_id TEXT NOT NULL,
+      tool_id TEXT,
+      is_selected INTEGER NOT NULL DEFAULT 0 CHECK(
+        is_selected IN (0, 1)
+      ),
+      cost_min_micros INTEGER,
+      cost_max_micros INTEGER,
+      cost_currency TEXT,
+      time_min_minutes INTEGER,
+      time_max_minutes INTEGER,
+      fit_status TEXT NOT NULL DEFAULT 'unknown' CHECK(
+        fit_status IN (
+          'meets',
+          'below_minimum',
+          'unknown'
+        )
+      ),
+      excluded_reason TEXT,
+      pricing_basis TEXT,
+      rationale TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(project_task_id) REFERENCES project_tasks(id) ON DELETE CASCADE,
+      FOREIGN KEY(model_id) REFERENCES models(id) ON DELETE CASCADE,
+      FOREIGN KEY(tool_id) REFERENCES user_ai_tools(id) ON DELETE SET NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_usage_timestamp
       ON usage_records(timestamp);
 
@@ -245,6 +439,39 @@ export function initDb() {
 
     CREATE INDEX IF NOT EXISTS idx_pricing_provider_model
       ON pricing_versions(provider_id, model);
+
+    CREATE INDEX IF NOT EXISTS idx_project_plans_project
+      ON project_plans(project_id);
+
+    CREATE INDEX IF NOT EXISTS idx_project_tasks_plan
+      ON project_tasks(plan_id);
+
+    CREATE INDEX IF NOT EXISTS idx_project_tasks_task
+      ON project_tasks(task_id);
+
+    CREATE INDEX IF NOT EXISTS idx_project_task_ai_options_task
+      ON project_task_ai_options(project_task_id);
+
+    CREATE INDEX IF NOT EXISTS idx_project_task_ai_options_model
+      ON project_task_ai_options(model_id);
+
+    CREATE INDEX IF NOT EXISTS idx_project_task_ai_options_tool
+      ON project_task_ai_options(tool_id);
+
+    /*
+     * At most one option per (planned step, model, tool). This is an
+     * expression index because SQLite treats NULLs as distinct in a
+     * plain UNIQUE constraint, which would let the same model be
+     * added twice for the same step with no tool. COALESCE maps NULL
+     * to '' so "no tool" collapses to a single value and stays
+     * distinct from any real tool_id.
+     */
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_project_task_ai_options_unique
+      ON project_task_ai_options(
+        project_task_id,
+        model_id,
+        COALESCE(tool_id, '')
+      );
 
     /*
      * Global invariant: at most one task session may be active at
