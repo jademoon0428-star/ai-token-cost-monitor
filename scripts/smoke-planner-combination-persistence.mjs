@@ -362,6 +362,7 @@ aiResourceRepository.createAiResource({
   entitlementName: "free tier",
   entitlementSourceUrl: "https://example.invalid/tier",
   entitlementCheckedAt: FIXTURE_TIME,
+  pricingBasisKind: "registry",
   createdAt: FIXTURE_TIME,
 });
 
@@ -370,6 +371,7 @@ aiResourceRepository.createAiResource({
   name: "Pay as you go CLI access",
   modelId: REGISTRY_MODELS.cny.id,
   accessMethod: "pay_as_you_go",
+  pricingBasisKind: "registry",
   createdAt: FIXTURE_TIME,
 });
 
@@ -379,6 +381,7 @@ aiResourceRepository.createAiResource({
   toolId: TOOL_SUB,
   modelId: REGISTRY_MODELS.priced.id,
   accessMethod: "subscription",
+  pricingBasisKind: "registry",
   createdAt: FIXTURE_TIME,
 });
 

@@ -299,7 +299,10 @@ for (const [modelId, providerId] of Object.entries(
  * Only the nominal model has a registry rate (USD). This mirrors the
  * real database exactly: DeepSeek has verified evidence but no
  * pricing_versions row, so its planned cost is Unknown and must stay
- * Unknown even though evidence exists.
+ * Unknown even though evidence exists. The DeepSeek resource also
+ * carries no pricing basis (pricing_basis_kind 'none'), so B3-1 keeps
+ * it unpriced by fact; the nominal resource declares a 'registry'
+ * basis so its api-equivalent cost stays real.
  */
 getDb()
   .prepare(
@@ -652,6 +655,7 @@ aiResourceRepository.createAiResource({
   name: "NominalCo pay-as-you-go",
   modelId: NOMINAL_MODEL,
   accessMethod: "pay_as_you_go",
+  pricingBasisKind: "registry",
   createdAt: FIXTURE_TIME,
 });
 

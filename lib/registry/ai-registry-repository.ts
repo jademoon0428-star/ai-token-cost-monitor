@@ -507,6 +507,46 @@ export function resolveRegistryPricing(
   return match ?? null;
 }
 
+/*
+ * Returns the one pricing_versions row a resource pinned by id, or
+ * null when no such card exists. This is the exact-row read a pinned
+ * pricing basis needs: B3-1 lets an ai_resources.pricing_version_id
+ * select a specific card, which need not be the card in force at the
+ * plan instant. Like resolveRegistryPricing, null means "price
+ * unknown" and must never be read as a zero cost.
+ */
+export function getRegistryPricingById(
+  id: string
+): RegistryPricingRow | null {
+  initDb();
+
+  const row = getDb()
+    .prepare(
+      `
+        SELECT
+          id,
+          provider_id,
+          model,
+          currency,
+          input_per_million,
+          output_per_million,
+          cached_per_million,
+          reasoning_per_million,
+          effective_from,
+          effective_to
+        FROM pricing_versions
+        WHERE id = ?
+      `
+    )
+    .get(id) as RegistryPricingRow | undefined;
+
+  if (!row) {
+    return null;
+  }
+
+  return toPricingRows([row])[0];
+}
+
 export function createUserAiTool(
   input: CreateUserAiToolInput
 ): void {

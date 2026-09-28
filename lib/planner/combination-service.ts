@@ -55,8 +55,12 @@ import {
   listProjectTasks,
   saveCombinationPlans,
 } from "@/lib/repositories/planner-repository";
-import { listAiResources } from "@/lib/repositories/ai-resource-repository";
 import {
+  listAiResources,
+  type AiResourceRow,
+} from "@/lib/repositories/ai-resource-repository";
+import {
+  getRegistryPricingById,
   listAiRegistry,
   resolveRegistryPricing,
 } from "@/lib/registry/ai-registry-repository";
@@ -134,6 +138,96 @@ function registryModelViews(): RegistryModelView[] {
     }))
   );
 }
+/*
+ * The nominal pricing basis of one registered resource, decided from
+ * the resource's own recorded facts (B3-1, R3.4):
+ *
+ *   pricing_basis_kind 'registry' + a pinned pricing_version_id: the
+ *     exact pinned card is the basis. Nothing is resolved from the
+ *     instant, and a card the plan instant does not fall inside is
+ *     still handed over - the estimator refuses to price it, which is
+ *     the honest answer.
+ *   pricing_basis_kind 'registry' + no pin: the registry card in force
+ *     at the shared pricing_basis_at, exactly the old behaviour.
+ *   pricing_basis_kind 'none': no nominal pricing basis. No registry
+ *     rate is resolved at all, so a planned cost that needs nominal
+ *     pricing stays Unknown. Historical evidence is never converted
+ *     into a nominal rate here or anywhere below.
+ */
+function resolveRegisteredPricing(
+  resource: AiResourceRow,
+  at: string
+): RegistryPricingRow | null {
+  if (resource.pricing_basis_kind === "none") {
+    return null;
+  }
+
+  if (resource.pricing_version_id !== null) {
+    return getRegistryPricingById(
+      resource.pricing_version_id
+    );
+  }
+
+  return resolveRegistryPricing(
+    resource.model_id,
+    at
+  );
+}
+
+/*
+ * A one-line label of which nominal-pricing path B3-1 took for a
+ * registered resource. It is written into the stored cost_basis so the
+ * basis stays auditable alongside the out-of-pocket provenance; it is
+ * never a price and never fed to any cost math.
+ */
+function describeNominalPricingBasis(
+  resource: AiResourceRow,
+  at: string
+): string {
+  if (resource.pricing_basis_kind === "registry") {
+    if (resource.pricing_version_id !== null) {
+      return `pinned registry pricing card ${resource.pricing_version_id}`;
+    }
+
+    return `registry pricing resolved at pricing_basis_at=${at}`;
+  }
+
+  return `no nominal pricing basis (pricing_basis_kind=none)`;
+}
+
+/*
+ * The stored cost_basis of one assignment: the rules' own out-of-pocket
+ * provenance, extended for a registered resource with the nominal
+ * pricing-basis path B3-1 took. A registry-source assignment keeps the
+ * rules' string untouched. The provenance is never a price and never
+ * merged into any cost figure (B3-2).
+ */
+function composeCostBasis(
+  assignment: {
+    source: "registered" | "registry";
+    candidateResourceId: string;
+    outOfPocket: { basis: string | null };
+  },
+  nominalBasisNotes: ReadonlyMap<string, string>
+): string | null {
+  if (assignment.source !== "registered") {
+    return assignment.outOfPocket.basis;
+  }
+
+  const note = nominalBasisNotes.get(
+    assignment.candidateResourceId
+  );
+
+  if (note === undefined) {
+    return assignment.outOfPocket.basis;
+  }
+
+  const basis = assignment.outOfPocket.basis;
+
+  return basis === null
+    ? `nominal pricing basis: ${note}`
+    : `${basis}; nominal pricing basis: ${note}`;
+}
 
 /*
  * The "registered" half of the pool: every active ai_resources row.
@@ -146,10 +240,11 @@ function registryModelViews(): RegistryModelView[] {
  */
 function buildRegisteredResources(
   at: string,
+  resources: ReadonlyArray<AiResourceRow>,
   models: ReadonlyMap<string, RegistryModelView>,
   toolNames: ReadonlyMap<string, string>
 ): CombinationResource[] {
-  return listAiResources({ status: "active" }).map((row) => {
+  return resources.map((row) => {
     const model = models.get(row.model_id);
 
     return {
@@ -172,7 +267,7 @@ function buildRegisteredResources(
         row.entitlement_name !== null,
       capabilities: model?.capabilities ?? null,
       pricing: toPlannerCostPricing(
-        resolveRegistryPricing(row.model_id, at)
+        resolveRegisteredPricing(row, at)
       ),
     };
   });
@@ -310,9 +405,29 @@ export function generateProjectPlanCombinations(
     ).map((tool) => [tool.id, tool.name])
   );
 
+  const activeResources = listAiResources({
+    status: "active",
+  });
+
+  /*
+   * B3-2: the nominal-pricing provenance of every registered resource,
+   * keyed by resource id so it can be attached to each persisted
+   * assignment's cost_basis.
+   */
+  const nominalBasisNotes = new Map(
+    activeResources.map((resource) => [
+      resource.id,
+      describeNominalPricingBasis(
+        resource,
+        pricingBasisAt
+      ),
+    ])
+  );
+
   const resources: CombinationResource[] = [
     ...buildRegisteredResources(
       pricingBasisAt,
+      activeResources,
       modelsById,
       toolNames
     ),
@@ -431,7 +546,10 @@ export function generateProjectPlanCombinations(
           plannedTimeMinMinutes: time?.min ?? null,
           plannedTimeMaxMinutes: time?.max ?? null,
           fitStatus: assignment.fitStatus,
-          costBasis: assignment.outOfPocket.basis,
+          costBasis: composeCostBasis(
+            assignment,
+            nominalBasisNotes
+          ),
           rationale: assignment.rationale,
           createdAt: now,
         };
