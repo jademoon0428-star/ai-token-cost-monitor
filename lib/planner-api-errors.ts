@@ -20,9 +20,9 @@ import { NextResponse } from "next/server";
 import { PlannerServiceError } from "@/lib/services/planner-service";
 
 /*
- * A missing row is a 404. A reference to a model or tool that does
- * not exist is also a 404 rather than a 400: from the caller's point
- * of view the thing it named is simply not there.
+ * A missing row is a 404. A reference to a model, tool or pricing
+ * version that does not exist is also a 404 rather than a 400: from
+ * the caller's point of view the thing it named is simply not there.
  */
 const NOT_FOUND_CODES: ReadonlySet<string> = new Set([
   "PROJECT_NOT_FOUND",
@@ -33,6 +33,7 @@ const NOT_FOUND_CODES: ReadonlySet<string> = new Set([
   "TASK_NOT_FOUND",
   "MODEL_NOT_FOUND",
   "TOOL_NOT_FOUND",
+  "PRICING_VERSION_NOT_FOUND",
 ]);
 
 /*

@@ -12,7 +12,9 @@ import { listAiResources } from "@/lib/repositories/ai-resource-repository";
 import {
   ACCESS_METHODS,
   AiResourceServiceError,
+  CHANNELS,
   createAiResource,
+  PRICING_BASIS_KINDS,
 } from "@/lib/services/ai-resource-service";
 
 export const runtime = "nodejs";
@@ -20,10 +22,25 @@ export const runtime = "nodejs";
 /*
  * POST /api/planner/resources
  *
- * Records one way the user can access one model. id, created_at and
- * updated_at are server-owned and are not in this list; status is
- * deliberate absent too, because a new resource is always active and
- * moving one out of the active view is the separate archive command.
+ * Records one way the user can access one model. id, created_at,
+ * updated_at, owner and status are server-owned and are not in this
+ * list: owner is always 'user' for UI-created rows and status is
+ * always 'active' on create (moving one out of the active view is the
+ * separate archive command).
+ *
+ * channel is optional: when omitted it defaults to 'unknown'. It is a
+ * recorded reachability fact and nothing more; no key is stored, no
+ * provider connection is opened and no cost is calculated here. Any
+ * body key outside this list, including owner, is rejected.
+ *
+ * pricingBasisKind is optional and defaults to 'none'; the allowed
+ * values are the facts from the R3.4-B1 contract ('registry' or
+ * 'none'). pricingVersionId may pin one registry pricing_versions
+ * row and pricingBasisCheckedAt stamps when the fact was set — all
+ * three are facts only, never a price, and a measured/verified-usage
+ * basis is not offered. The service refuses an unknown
+ * pricingVersionId (404) and a pricingVersionId paired with 'none'
+ * (400).
  *
  * No cost field appears here and no role / score / rank / selected /
  * recommended field either: a resource is inventory, not a price and
@@ -39,10 +56,22 @@ const CREATE_FIELDS: readonly PlannerFieldSpec[] = [
     required: true,
     enumValues: ACCESS_METHODS,
   },
+  {
+    key: "channel",
+    type: "enum",
+    enumValues: CHANNELS,
+  },
   { key: "entitlementName", type: "string" },
   { key: "entitlementSourceUrl", type: "string" },
   { key: "entitlementCheckedAt", type: "string" },
   { key: "notes", type: "string" },
+  {
+    key: "pricingBasisKind",
+    type: "enum",
+    enumValues: PRICING_BASIS_KINDS,
+  },
+  { key: "pricingVersionId", type: "string" },
+  { key: "pricingBasisCheckedAt", type: "string" },
 ];
 
 export async function POST(request: Request) {

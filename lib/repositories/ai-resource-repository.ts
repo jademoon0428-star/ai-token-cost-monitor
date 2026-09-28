@@ -6,7 +6,10 @@ import { initDb } from "@/lib/schema";
  *
  * Plain data access only. No pricing, no cost, no capacity, no model
  * capability judgement, no recommendation and no selection happen
- * here: this module stores and returns exactly what it is given.
+ * here: this module stores and returns exactly what it is given. The
+ * R3.4-B1 pricing-basis columns are stored as facts only — kind,
+ * an optional pinned pricing_versions row and a checked-at stamp —
+ * and never turned into a price or a cost estimate here.
  *
  * A resource is the "what the user owns" record: one way the user can
  * access one model, either directly (tool_id NULL) or through one
@@ -21,9 +24,34 @@ export type AiResourceAccessMethod =
   | "pay_as_you_go"
   | "unknown";
 
+/*
+ * channel is the reachability axis, orthogonal to access_method:
+ * own_api means the user's own API key path, gateway a third-party
+ * gateway, web_only a subscription-web resource with no measurable
+ * API, unknown a path not yet recorded.
+ */
+export type AiResourceChannel =
+  | "own_api"
+  | "gateway"
+  | "web_only"
+  | "unknown";
+
+export type AiResourceOwner = "user" | "system";
+
 export type AiResourceStatus =
   | "active"
   | "archived";
+
+/*
+ * pricing_basis_kind records the pricing basis this resource carries:
+ * 'none' means no pricing basis has been recorded, 'registry' means it
+ * is priced against the registry rate card. It is a fact-carrier
+ * only; no price is derived here. A measured/verified-usage basis is
+ * deliberately not a value in this step.
+ */
+export type AiResourcePricingBasisKind =
+  | "registry"
+  | "none";
 
 export type AiResourceRow = {
   id: string;
@@ -31,13 +59,18 @@ export type AiResourceRow = {
   tool_id: string | null;
   model_id: string;
   access_method: AiResourceAccessMethod;
+  channel: AiResourceChannel;
   entitlement_name: string | null;
   entitlement_source_url: string | null;
   entitlement_checked_at: string | null;
   status: AiResourceStatus;
+  owner: AiResourceOwner;
   notes: string | null;
   created_at: string;
   updated_at: string;
+  pricing_basis_kind: AiResourcePricingBasisKind;
+  pricing_version_id: string | null;
+  pricing_basis_checked_at: string | null;
 };
 
 export type CreateAiResourceInput = {
@@ -46,10 +79,14 @@ export type CreateAiResourceInput = {
   toolId?: string | null;
   modelId: string;
   accessMethod: AiResourceAccessMethod;
+  channel: AiResourceChannel;
   entitlementName?: string | null;
   entitlementSourceUrl?: string | null;
   entitlementCheckedAt?: string | null;
   notes?: string | null;
+  pricingBasisKind?: AiResourcePricingBasisKind;
+  pricingVersionId?: string | null;
+  pricingBasisCheckedAt?: string | null;
   createdAt: string;
 };
 
@@ -58,10 +95,14 @@ export type UpdateAiResourceInput = {
   toolId?: string | null;
   modelId?: string;
   accessMethod?: AiResourceAccessMethod;
+  channel?: AiResourceChannel;
   entitlementName?: string | null;
   entitlementSourceUrl?: string | null;
   entitlementCheckedAt?: string | null;
   notes?: string | null;
+  pricingBasisKind?: AiResourcePricingBasisKind;
+  pricingVersionId?: string | null;
+  pricingBasisCheckedAt?: string | null;
   updatedAt: string;
 };
 
@@ -71,17 +112,22 @@ const AI_RESOURCE_COLUMNS = `
   tool_id,
   model_id,
   access_method,
+  channel,
   entitlement_name,
   entitlement_source_url,
   entitlement_checked_at,
   status,
+  owner,
   notes,
   created_at,
-  updated_at
+  updated_at,
+  pricing_basis_kind,
+  pricing_version_id,
+  pricing_basis_checked_at
 `;
 
 const INSERT_PARAMS =
-  "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?";
+  "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?";
 
 function insertAiResource(
   input: CreateAiResourceInput
@@ -95,13 +141,18 @@ function insertAiResource(
          tool_id,
          model_id,
          access_method,
+         channel,
          entitlement_name,
          entitlement_source_url,
          entitlement_checked_at,
          status,
+         owner,
          notes,
          created_at,
-         updated_at
+         updated_at,
+         pricing_basis_kind,
+         pricing_version_id,
+         pricing_basis_checked_at
        )
        VALUES (${INSERT_PARAMS})`
     )
@@ -111,13 +162,18 @@ function insertAiResource(
       input.toolId ?? null,
       input.modelId,
       input.accessMethod,
+      input.channel ?? "unknown",
       input.entitlementName ?? null,
       input.entitlementSourceUrl ?? null,
       input.entitlementCheckedAt ?? null,
       "active",
+      "user",
       input.notes ?? null,
       input.createdAt,
-      input.createdAt
+      input.createdAt,
+      input.pricingBasisKind ?? "none",
+      input.pricingVersionId ?? null,
+      input.pricingBasisCheckedAt ?? null
     );
 }
 
@@ -204,6 +260,11 @@ export function updateAiResource(
     params.push(input.accessMethod);
   }
 
+  if (input.channel !== undefined) {
+    assignments.push("channel = ?");
+    params.push(input.channel);
+  }
+
   if (input.entitlementName !== undefined) {
     assignments.push(
       "entitlement_name = ?"
@@ -232,6 +293,27 @@ export function updateAiResource(
   if (input.notes !== undefined) {
     assignments.push("notes = ?");
     params.push(input.notes);
+  }
+
+  if (input.pricingBasisKind !== undefined) {
+    assignments.push(
+      "pricing_basis_kind = ?"
+    );
+    params.push(input.pricingBasisKind);
+  }
+
+  if (input.pricingVersionId !== undefined) {
+    assignments.push(
+      "pricing_version_id = ?"
+    );
+    params.push(input.pricingVersionId);
+  }
+
+  if (input.pricingBasisCheckedAt !== undefined) {
+    assignments.push(
+      "pricing_basis_checked_at = ?"
+    );
+    params.push(input.pricingBasisCheckedAt);
   }
 
   if (assignments.length === 0) {

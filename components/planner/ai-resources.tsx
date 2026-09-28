@@ -46,7 +46,10 @@ type ProviderOption = {
  * The shape of one resource row, copied from the R3.1 API contract on
  * purpose. No field is invented here: there is no cost, no role, no
  * score, no rank, no tier and no recommendation, so the UI shows none
- * of them.
+ * of them. The R3.4-B1 pricing basis is a recorded fact
+ * (pricing_basis_kind, an optional pinned pricing_versions id and a
+ * checked-at stamp); it is shown as-is and never turned into a price,
+ * a saving or a recommendation.
  */
 type AiResourceRow = {
   id: string;
@@ -54,13 +57,18 @@ type AiResourceRow = {
   tool_id: string | null;
   model_id: string;
   access_method: AccessMethod;
+  channel: Channel;
   entitlement_name: string | null;
   entitlement_source_url: string | null;
   entitlement_checked_at: string | null;
   status: "active" | "archived";
+  owner: "user" | "system";
   notes: string | null;
   created_at: string;
   updated_at: string;
+  pricing_basis_kind: PricingBasis;
+  pricing_version_id: string | null;
+  pricing_basis_checked_at: string | null;
 };
 
 type AccessMethod =
@@ -68,6 +76,26 @@ type AccessMethod =
   | "subscription"
   | "pay_as_you_go"
   | "unknown";
+
+/*
+ * channel is the reachability axis, orthogonal to access_method. It is
+ * a recorded fact; the form adds no key, URL or credential, and the
+ * app never opens a provider connection from it.
+ */
+type Channel =
+  | "own_api"
+  | "gateway"
+  | "web_only"
+  | "unknown";
+
+/*
+ * The pricing basis of a resource, from the R3.4-B1 contract: 'none'
+ * means no pricing basis has been recorded, 'registry' means it is
+ * priced against the registry rate card. It is a neutral fact; the UI
+ * offers only these two values, calculates nothing from them and
+ * never recommends one over the other.
+ */
+type PricingBasis = "registry" | "none";
 
 type ResourceView = "active" | "archived";
 
@@ -95,6 +123,42 @@ const ACCESS_METHOD_COLORS: Record<AccessMethod, string> = {
   subscription: "#3976cf",
   pay_as_you_go: "#5a4ce1",
   unknown: "#98a2b3",
+};
+
+const CHANNEL_LABELS: Record<Channel, string> = {
+  own_api: "Own API",
+  gateway: "Gateway",
+  web_only: "Web only",
+  unknown: "Unknown",
+};
+
+const CHANNEL_ORDER: Channel[] = [
+  "own_api",
+  "gateway",
+  "web_only",
+  "unknown",
+];
+
+const CHANNEL_COLORS: Record<Channel, string> = {
+  own_api: "#159570",
+  gateway: "#3976cf",
+  web_only: "#5a4ce1",
+  unknown: "#98a2b3",
+};
+
+const PRICING_BASIS_LABELS: Record<PricingBasis, string> = {
+  registry: "Registry",
+  none: "None",
+};
+
+const PRICING_BASIS_ORDER: PricingBasis[] = [
+  "registry",
+  "none",
+];
+
+const PRICING_BASIS_COLORS: Record<PricingBasis, string> = {
+  registry: "#3976cf",
+  none: "#98a2b3",
 };
 
 const STATUS_LABELS: Record<ResourceView, string> = {
@@ -259,10 +323,13 @@ type ResourcePayload = {
   modelId: string;
   toolId: string | null;
   accessMethod: AccessMethod;
+  channel: Channel;
   entitlementName: string | null;
   entitlementSourceUrl: string | null;
   entitlementCheckedAt: string | null;
   notes: string | null;
+  pricingBasisKind: PricingBasis;
+  pricingVersionId: string | null | undefined;
 };
 
 /*
@@ -270,16 +337,24 @@ type ResourcePayload = {
  * the same for POST and PATCH. Optional fields the user left empty are
  * sent as null (never as empty strings, which the service rejects) and
  * an explicit null is how PATCH clears a value the row already had.
+ *
+ * The pricing basis is form-owned: it always travels with the record.
+ * pricing_version_id is not shown in the form, so it is only sent when
+ * the basis is 'none' (as an explicit null, to clear any pinned card
+ * the row may carry). Under 'registry' it is omitted entirely, which
+ * leaves an existing pin untouched — the UI never guesses a version.
  */
 function buildPayload(input: {
   name: string;
   modelId: string;
   toolId: string;
   accessMethod: AccessMethod;
+  channel: Channel;
   entitlementName: string;
   entitlementSourceUrl: string;
   entitlementCheckedAt: string;
   notes: string;
+  pricingBasisKind: PricingBasis;
 }): ResourcePayload {
   const name = input.name.trim();
   const entitlementName = input.entitlementName.trim();
@@ -296,6 +371,7 @@ function buildPayload(input: {
     name,
     modelId: input.modelId,
     accessMethod: input.accessMethod,
+    channel: input.channel,
     toolId,
     entitlementName:
       entitlementName === "" ? null : entitlementName,
@@ -305,6 +381,9 @@ function buildPayload(input: {
         : entitlementSourceUrl,
     entitlementCheckedAt,
     notes: notes === "" ? null : notes,
+    pricingBasisKind: input.pricingBasisKind,
+    pricingVersionId:
+      input.pricingBasisKind === "none" ? null : undefined,
   };
 }
 
@@ -313,10 +392,12 @@ const EMPTY_FORM = {
   modelId: "",
   toolId: "",
   accessMethod: "unknown" as AccessMethod,
+  channel: "unknown" as Channel,
   entitlementName: "",
   entitlementSourceUrl: "",
   entitlementCheckedAt: "",
   notes: "",
+  pricingBasisKind: "none" as PricingBasis,
 };
 
 export function AiResources({
@@ -425,6 +506,7 @@ export function AiResources({
       modelId: resource.model_id,
       toolId: resource.tool_id ?? "",
       accessMethod: resource.access_method,
+      channel: resource.channel,
       entitlementName: resource.entitlement_name ?? "",
       entitlementSourceUrl:
         resource.entitlement_source_url ?? "",
@@ -433,6 +515,7 @@ export function AiResources({
         10
       ),
       notes: resource.notes ?? "",
+      pricingBasisKind: resource.pricing_basis_kind,
     });
   }
 
@@ -848,6 +931,66 @@ export function AiResources({
           </div>
 
           <div>
+            <label htmlFor="resourceChannel" style={labelStyle}>
+              Channel
+            </label>
+
+            <select
+              id="resourceChannel"
+              value={form.channel}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  channel: event.target.value as Channel,
+                }))
+              }
+              style={inputStyle}
+            >
+              {CHANNEL_ORDER.map((value) => (
+                <option key={value} value={value}>
+                  {CHANNEL_LABELS[value]}
+                </option>
+              ))}
+            </select>
+
+            <p style={hintStyle}>
+              How this resource is reached. A recorded fact only: no
+              key, URL or provider connection is stored here.
+            </p>
+          </div>
+
+          <div>
+            <label htmlFor="resourcePricingBasis" style={labelStyle}>
+              Pricing basis
+            </label>
+
+            <select
+              id="resourcePricingBasis"
+              value={form.pricingBasisKind}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  pricingBasisKind: event.target
+                    .value as PricingBasis,
+                }))
+              }
+              style={inputStyle}
+            >
+              {PRICING_BASIS_ORDER.map((value) => (
+                <option key={value} value={value}>
+                  {PRICING_BASIS_LABELS[value]}
+                </option>
+              ))}
+            </select>
+
+            <p style={hintStyle}>
+              The pricing basis your plans should assume for this
+              resource. A recorded fact only: no price is calculated,
+              shown or recommended here.
+            </p>
+          </div>
+
+          <div>
             <label
               htmlFor="resourceEntitlementName"
               style={labelStyle}
@@ -1100,6 +1243,30 @@ export function AiResources({
                     color={
                       ACCESS_METHOD_COLORS[
                         resource.access_method
+                      ] ?? "#555"
+                    }
+                  />
+
+                  <Badge
+                    text={
+                      CHANNEL_LABELS[resource.channel] ??
+                      resource.channel
+                    }
+                    color={
+                      CHANNEL_COLORS[resource.channel] ??
+                      "#555"
+                    }
+                  />
+
+                  <Badge
+                    text={
+                      PRICING_BASIS_LABELS[
+                        resource.pricing_basis_kind
+                      ] ?? resource.pricing_basis_kind
+                    }
+                    color={
+                      PRICING_BASIS_COLORS[
+                        resource.pricing_basis_kind
                       ] ?? "#555"
                     }
                   />

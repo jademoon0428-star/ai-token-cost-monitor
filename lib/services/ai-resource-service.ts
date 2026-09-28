@@ -4,6 +4,8 @@ import { getDb } from "@/lib/db";
 import { initDb } from "@/lib/schema";
 import type {
   AiResourceAccessMethod,
+  AiResourceChannel,
+  AiResourcePricingBasisKind,
   AiResourceRow,
   UpdateAiResourceInput,
 } from "@/lib/repositories/ai-resource-repository";
@@ -27,7 +29,10 @@ import {
  *
  * - It does not compute a price, a cost, a currency figure or a
  *   budget. A resource names how a user accesses a model; it is not
- *   a price and it never carries planned or actual spend.
+ *   a price and it never carries planned or actual spend. The
+ *   R3.4-B1 pricing-basis columns are stored as facts (kind, an
+ *   optional pinned pricing_versions row, a checked-at stamp) and
+ *   are never turned into a rate or a cost estimate here.
  * - It does not judge model capabilities, fit or quality. There is
  *   no score / rank / tier / weight / confidence / role / selected /
  *   recommended concept here.
@@ -56,6 +61,31 @@ export const ACCESS_METHODS: AiResourceAccessMethod[] = [
   "subscription",
   "pay_as_you_go",
   "unknown",
+];
+
+/*
+ * channel records how a resource is reached or measured. It is a
+ * stored fact only: nothing here stores a key, opens a connection or
+ * triggers a provider call.
+ */
+export const CHANNELS: AiResourceChannel[] = [
+  "own_api",
+  "gateway",
+  "web_only",
+  "unknown",
+];
+
+/*
+ * The pricing basis a client may record, fixed by contract. 'none'
+ * means no pricing basis has been recorded (the default); 'registry'
+ * means the resource is priced against the registry rate card. The
+ * service records the fact and refuses bad values; it never turns a
+ * basis into a price or a cost estimate. A 'verified_usage' basis is
+ * deliberately not accepted here.
+ */
+export const PRICING_BASIS_KINDS: AiResourcePricingBasisKind[] = [
+  "registry",
+  "none",
 ];
 
 function fail(
@@ -261,6 +291,35 @@ function assertNoDuplicate(
   }
 }
 
+/*
+ * A pricingVersionId must name a real registry pricing_versions row.
+ * It pins one rate card; it is a reference, not a price. A missing
+ * row is a 404, matching how a missing model or tool is reported.
+ */
+function assertPricingVersionExists(
+  pricingVersionId: string
+): string {
+  const id = requiredText(
+    pricingVersionId,
+    "pricing_version_id"
+  );
+
+  const row = getDb()
+    .prepare(
+      `SELECT id FROM pricing_versions WHERE id = ?`
+    )
+    .get(id);
+
+  if (row === undefined) {
+    fail(
+      "PRICING_VERSION_NOT_FOUND",
+      `pricing version "${id}" does not exist`
+    );
+  }
+
+  return id;
+}
+
 function requireResource(
   id: string
 ): AiResourceRow {
@@ -281,10 +340,14 @@ export function createAiResource(input: {
   modelId: string;
   toolId?: string | null;
   accessMethod: AiResourceAccessMethod;
+  channel?: AiResourceChannel;
   entitlementName?: string | null;
   entitlementSourceUrl?: string | null;
   entitlementCheckedAt?: string | null;
   notes?: string | null;
+  pricingBasisKind?: AiResourcePricingBasisKind | null;
+  pricingVersionId?: string | null;
+  pricingBasisCheckedAt?: string | null;
 }): ReturnType<typeof getAiResource> {
   initDb();
 
@@ -304,6 +367,15 @@ export function createAiResource(input: {
     "INVALID_ACCESS_METHOD",
     "access_method"
   );
+  const channel =
+    input.channel === undefined
+      ? "unknown"
+      : assertOneOf(
+          input.channel,
+          CHANNELS,
+          "INVALID_CHANNEL",
+          "channel"
+        );
   const entitlementName = optionalText(
     input.entitlementName,
     "entitlement_name"
@@ -317,6 +389,41 @@ export function createAiResource(input: {
     "entitlement_checked_at"
   );
   const notes = optionalText(input.notes, "notes");
+  const pricingBasisKind =
+    input.pricingBasisKind === undefined ||
+    input.pricingBasisKind === null
+      ? "none"
+      : assertOneOf(
+          input.pricingBasisKind,
+          PRICING_BASIS_KINDS,
+          "INVALID_PRICING_BASIS",
+          "pricing_basis_kind"
+        );
+  const pricingVersionId =
+    input.pricingVersionId === undefined ||
+    input.pricingVersionId === null
+      ? null
+      : assertPricingVersionExists(
+          input.pricingVersionId
+        );
+  const pricingBasisCheckedAt = optionalText(
+    input.pricingBasisCheckedAt,
+    "pricing_basis_checked_at"
+  );
+
+  /*
+   * A resource with no pricing basis cannot carry a pinned rate card:
+   * the fact and its reference must agree.
+   */
+  if (
+    pricingVersionId !== null &&
+    pricingBasisKind === "none"
+  ) {
+    fail(
+      "INVALID_PRICING_BASIS",
+      "pricing_version_id cannot be set when pricing_basis_kind is none"
+    );
+  }
 
   assertNoDuplicate(
     modelId,
@@ -333,10 +440,14 @@ export function createAiResource(input: {
     toolId,
     modelId,
     accessMethod,
+    channel,
     entitlementName,
     entitlementSourceUrl,
     entitlementCheckedAt,
     notes,
+    pricingBasisKind,
+    pricingVersionId,
+    pricingBasisCheckedAt,
     createdAt: now,
   });
 
@@ -356,10 +467,14 @@ export function updateAiResource(
     toolId?: string | null;
     modelId?: string;
     accessMethod?: AiResourceAccessMethod;
+    channel?: AiResourceChannel;
     entitlementName?: string | null;
     entitlementSourceUrl?: string | null;
     entitlementCheckedAt?: string | null;
     notes?: string | null;
+    pricingBasisKind?: AiResourcePricingBasisKind | null;
+    pricingVersionId?: string | null;
+    pricingBasisCheckedAt?: string | null;
   }
 ): ReturnType<typeof getAiResource> {
   initDb();
@@ -384,6 +499,57 @@ export function updateAiResource(
           "INVALID_ACCESS_METHOD",
           "access_method"
         );
+  const channel =
+    input.channel === undefined
+      ? existing.channel
+      : assertOneOf(
+          input.channel,
+          CHANNELS,
+          "INVALID_CHANNEL",
+          "channel"
+        );
+  const pricingBasisKind =
+    input.pricingBasisKind === undefined
+      ? existing.pricing_basis_kind
+      : input.pricingBasisKind === null
+        ? "none"
+        : assertOneOf(
+            input.pricingBasisKind,
+            PRICING_BASIS_KINDS,
+            "INVALID_PRICING_BASIS",
+            "pricing_basis_kind"
+          );
+  const pricingVersionId =
+    input.pricingVersionId === undefined
+      ? existing.pricing_version_id
+      : input.pricingVersionId === null
+        ? null
+        : assertPricingVersionExists(
+            input.pricingVersionId
+          );
+  const pricingBasisCheckedAt =
+    input.pricingBasisCheckedAt === undefined
+      ? existing.pricing_basis_checked_at
+      : optionalText(
+          input.pricingBasisCheckedAt,
+          "pricing_basis_checked_at"
+        );
+
+  /*
+   * The fact and its reference must agree after the update. Switching
+   * a resource to 'none' while a pinned rate card survives is refused;
+   * the caller clears pricingVersionId explicitly (null) at the same
+   * time to record "no pricing basis".
+   */
+  if (
+    pricingVersionId !== null &&
+    pricingBasisKind === "none"
+  ) {
+    fail(
+      "INVALID_PRICING_BASIS",
+      "pricing_version_id cannot be set when pricing_basis_kind is none"
+    );
+  }
 
   if (
     toolId !== existing.tool_id ||
@@ -421,6 +587,10 @@ export function updateAiResource(
     patch.accessMethod = accessMethod;
   }
 
+  if (input.channel !== undefined) {
+    patch.channel = channel;
+  }
+
   if (input.entitlementName !== undefined) {
     patch.entitlementName = optionalText(
       input.entitlementName,
@@ -447,6 +617,18 @@ export function updateAiResource(
       input.notes,
       "notes"
     );
+  }
+
+  if (input.pricingBasisKind !== undefined) {
+    patch.pricingBasisKind = pricingBasisKind;
+  }
+
+  if (input.pricingVersionId !== undefined) {
+    patch.pricingVersionId = pricingVersionId;
+  }
+
+  if (input.pricingBasisCheckedAt !== undefined) {
+    patch.pricingBasisCheckedAt = pricingBasisCheckedAt;
   }
 
   updateAiResourceInDb(resourceId, patch);

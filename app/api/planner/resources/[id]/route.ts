@@ -12,6 +12,8 @@ import { getAiResource } from "@/lib/repositories/ai-resource-repository";
 import {
   ACCESS_METHODS,
   AiResourceServiceError,
+  CHANNELS,
+  PRICING_BASIS_KINDS,
   updateAiResource,
 } from "@/lib/services/ai-resource-service";
 
@@ -19,10 +21,21 @@ export const runtime = "nodejs";
 
 /*
  * The same writable business fields as create, minus the required
- * flag: PATCH is a partial update. status is absent on purpose — it
- * follows its own guarded transition through the archive endpoint —
- * and so are id, created_at, updated_at and every cost / role /
- * score / rank / selected / recommended field.
+ * flag: PATCH is a partial update. channel is optional here, as on
+ * create. status and owner are absent on purpose — status follows its
+ * own guarded transition through the archive endpoint, and owner is
+ * server-owned — and so are id, created_at, updated_at and every cost
+ * / role / score / rank / selected / recommended field. Any body key
+ * outside this list, including owner, is rejected.
+ *
+ * pricingBasisKind / pricingVersionId / pricingBasisCheckedAt follow
+ * the create contract: they are fact columns only (kind 'registry' or
+ * 'none', an optional pinned pricing_versions row and a checked-at
+ * stamp), never a price. An explicit null clears an optional value —
+ * a null pricingBasisKind resets to 'none' and a null
+ * pricingVersionId drops a pin — and the service refuses an unknown
+ * pricingVersionId (404) or a non-null pricingVersionId under 'none'
+ * (400).
  */
 const PATCH_FIELDS: readonly PlannerFieldSpec[] = [
   { key: "name", type: "string" },
@@ -33,10 +46,22 @@ const PATCH_FIELDS: readonly PlannerFieldSpec[] = [
     type: "enum",
     enumValues: ACCESS_METHODS,
   },
+  {
+    key: "channel",
+    type: "enum",
+    enumValues: CHANNELS,
+  },
   { key: "entitlementName", type: "string" },
   { key: "entitlementSourceUrl", type: "string" },
   { key: "entitlementCheckedAt", type: "string" },
   { key: "notes", type: "string" },
+  {
+    key: "pricingBasisKind",
+    type: "enum",
+    enumValues: PRICING_BASIS_KINDS,
+  },
+  { key: "pricingVersionId", type: "string" },
+  { key: "pricingBasisCheckedAt", type: "string" },
 ];
 
 /*

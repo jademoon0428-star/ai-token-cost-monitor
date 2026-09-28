@@ -341,7 +341,7 @@ await check("1. schema creates ai_resources with exactly the designed columns", 
 
   assertEqual(
     columns.join(","),
-    "id,name,tool_id,model_id,access_method,entitlement_name,entitlement_source_url,entitlement_checked_at,status,notes,created_at,updated_at",
+    "id,name,tool_id,model_id,access_method,channel,entitlement_name,entitlement_source_url,entitlement_checked_at,status,owner,notes,created_at,updated_at,pricing_basis_kind,pricing_version_id,pricing_basis_checked_at",
     "ai_resources column set"
   );
   assertEqual(
@@ -387,6 +387,16 @@ await check("2. can create a direct API resource with toolId null", () => {
     directRes.body.resource.status,
     "active",
     "a new resource starts active"
+  );
+  assertEqual(
+    directRes.body.resource.channel,
+    "unknown",
+    "an omitted channel defaults to unknown"
+  );
+  assertEqual(
+    directRes.body.resource.owner,
+    "user",
+    "owner defaults to user"
   );
   assert(
     typeof directRes.body.resource.id === "string" &&
@@ -496,6 +506,577 @@ await check("6. can create an unknown resource", () => {
     unknownRes.body.resource.access_method,
     "unknown",
     "unknown is a legal closed-set value"
+  );
+});
+
+/* ---------------------------------------------------------------- */
+/* R3.4-A: channel + owner foundation                                */
+/* ---------------------------------------------------------------- */
+
+const ownApiRes = await post(
+  resourcesRoute.POST,
+  "/api/planner/resources",
+  {
+    name: "Own API channel",
+    modelId: "model_r31_b",
+    accessMethod: "pay_as_you_go",
+    channel: "own_api",
+  }
+);
+
+const gatewayRes = await post(
+  resourcesRoute.POST,
+  "/api/planner/resources",
+  {
+    name: "Gateway channel",
+    modelId: "model_r31_a",
+    accessMethod: "free_tier",
+    channel: "gateway",
+  }
+);
+
+const webOnlyRes = await post(
+  resourcesRoute.POST,
+  "/api/planner/resources",
+  {
+    name: "Web-only channel",
+    modelId: "model_r31_c",
+    toolId: "tool_r31_cli",
+    accessMethod: "subscription",
+    channel: "web_only",
+  }
+);
+
+const CHANNEL_ROWS = [
+  ownApiRes,
+  gatewayRes,
+  webOnlyRes,
+].map((res) => res.body.resource);
+
+await check("6b. every channel value is accepted and stored", () => {
+  assertEqual(ownApiRes.status, 201, "own_api accepted");
+  assertEqual(webOnlyRes.status, 201, "web_only accepted");
+  assertEqual(
+    ownApiRes.body.resource.channel,
+    "own_api",
+    "own_api stored"
+  );
+  assertEqual(
+    gatewayRes.body.resource.channel,
+    "gateway",
+    "gateway stored"
+  );
+  assertEqual(
+    webOnlyRes.body.resource.channel,
+    "web_only",
+    "web_only stored"
+  );
+
+  for (const row of CHANNEL_ROWS) {
+    assertEqual(
+      row.owner,
+      "user",
+      "owner is server-owned and always user"
+    );
+  }
+});
+
+await check("6c. an invalid channel is refused", () => {
+  return post(
+    resourcesRoute.POST,
+    "/api/planner/resources",
+    {
+      name: "Proxy channel",
+      modelId: "model_r31_b",
+      toolId: "tool_r31_cli",
+      accessMethod: "unknown",
+      channel: "proxy",
+    }
+  ).then((res) => {
+    expectError(
+      res,
+      400,
+      "INVALID_ENUM",
+      "invalid channel"
+    );
+    assertEqual(
+      countRows("ai_resources"),
+      8,
+      "no row was created"
+    );
+  });
+});
+
+await check("6d. owner is never client-settable on POST", () => {
+  return post(
+    resourcesRoute.POST,
+    "/api/planner/resources",
+    {
+      name: "Owner leak",
+      modelId: "model_r31_b",
+      accessMethod: "free_tier",
+      owner: "system",
+    }
+  ).then((res) => {
+    expectError(
+      res,
+      400,
+      "UNKNOWN_FIELD",
+      "owner in the POST body"
+    );
+    assertEqual(
+      countRows("ai_resources"),
+      8,
+      "no row was created"
+    );
+  });
+});
+
+await check("6e. PATCH updates channel and refuses owner", () => {
+  return Promise.all([
+    patch(
+      resourceRoute.PATCH,
+      `/api/planner/resources/${SUB_ID}`,
+      { channel: "gateway" },
+      { id: SUB_ID }
+    ).then((res) => {
+      assertEqual(res.status, 200, "status");
+      assertEqual(
+        res.body.resource.channel,
+        "gateway",
+        "channel updated"
+      );
+      assertEqual(
+        res.body.resource.access_method,
+        "subscription",
+        "an unsent field is untouched"
+      );
+      assertEqual(
+        res.body.resource.owner,
+        "user",
+        "owner stays server-owned"
+      );
+    }),
+    patch(
+      resourceRoute.PATCH,
+      `/api/planner/resources/${SUB_ID}`,
+      { owner: "system" },
+      { id: SUB_ID }
+    ).then((res) =>
+      expectError(
+        res,
+        400,
+        "UNKNOWN_FIELD",
+        "owner in the PATCH body"
+      )
+    ),
+  ]);
+});
+
+await check("6f. re-running initDb keeps the schema unchanged", () => {
+  initDb();
+
+  assertEqual(
+    columnsOf("ai_resources").join(","),
+    "id,name,tool_id,model_id,access_method,channel,entitlement_name,entitlement_source_url,entitlement_checked_at,status,owner,notes,created_at,updated_at,pricing_basis_kind,pricing_version_id,pricing_basis_checked_at",
+    "no duplicate columns after re-running the migration"
+  );
+});
+
+await check("6g. legacy rows fall back to unknown channel and user owner", () => {
+  getDb()
+    .prepare(
+      `INSERT INTO ai_resources (id, name, model_id, access_method, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      "r34a_legacy",
+      "Legacy defaults",
+      "model_r31_b",
+      "free_tier",
+      "active",
+      NOW,
+      NOW
+    );
+
+  const row = getDb()
+    .prepare(
+      `SELECT channel, owner, pricing_basis_kind FROM ai_resources WHERE id = ?`
+    )
+    .get("r34a_legacy");
+
+  assertEqual(
+    row.channel,
+    "unknown",
+    "channel backfills via the column default"
+  );
+  assertEqual(
+    row.owner,
+    "user",
+    "owner backfills via the column default"
+  );
+  assertEqual(
+    row.pricing_basis_kind,
+    "none",
+    "pricing basis backfills via the column default"
+  );
+
+  getDb()
+    .prepare(
+      `DELETE FROM ai_resources WHERE id = ?`
+    )
+    .run("r34a_legacy");
+});
+
+await check("6h. R3.3-B planner tables keep the frozen column sets", () => {
+  const frozen = {
+    project_plans:
+      "id,project_id,version,strategy,summary,pricing_basis_at,created_at",
+    plan_resource_assignments:
+      "id,plan_id,project_task_id,ai_resource_id,registry_model_id,resource_source,role,role_source,is_primary,sequence,planned_cost_min_micros,planned_cost_max_micros,planned_cost_currency,planned_time_min_minutes,planned_time_max_minutes,fit_status,cost_basis,rationale,created_at,updated_at",
+  };
+
+  for (const [name, expected] of Object.entries(
+    frozen
+  )) {
+    assertEqual(
+      columnsOf(name).join(","),
+      expected,
+      `${name} column set is frozen`
+    );
+  }
+});
+
+await check("6i. the channel fixture rows are cleaned up", () => {
+  for (const row of CHANNEL_ROWS) {
+    getDb()
+      .prepare(
+        `DELETE FROM ai_resources WHERE id = ?`
+      )
+      .run(row.id);
+  }
+
+  assertEqual(
+    countRows("ai_resources"),
+    5,
+    "back to the five original fixtures"
+  );
+});
+
+/* ---------------------------------------------------------------- */
+/* R3.4-B1: pricing basis facts                                      */
+/* ---------------------------------------------------------------- */
+
+/*
+ * The isolated database never runs seed:registry, so the pricing
+ * card this section references is inserted directly, exactly like the
+ * model fixtures above. It is removed again in the last check.
+ */
+getDb()
+  .prepare(
+    `INSERT INTO pricing_versions
+      (id, provider_id, model, currency, input_per_million,
+       output_per_million, cached_per_million,
+       reasoning_per_million, effective_from, effective_to)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  )
+  .run(
+    "r34b_pricing_v1",
+    "provider_r31",
+    "model_r31_a",
+    "USD",
+    0.5,
+    1.5,
+    0.25,
+    1.5,
+    NOW,
+    null
+  );
+
+await check("6j. an omitted pricing basis defaults to none", () => {
+  const resource = directRes.body.resource;
+
+  assertEqual(
+    resource.pricing_basis_kind,
+    "none",
+    "pricing_basis_kind defaults to none"
+  );
+  assertEqual(
+    resource.pricing_version_id,
+    null,
+    "no pricing version is pinned"
+  );
+  assertEqual(
+    resource.pricing_basis_checked_at,
+    null,
+    "no check time is recorded"
+  );
+});
+
+await check("6k. both pricing basis values are accepted and stored", () => {
+  return post(
+    resourcesRoute.POST,
+    "/api/planner/resources",
+    {
+      name: "Explicit none basis",
+      modelId: "model_r31_b",
+      accessMethod: "free_tier",
+      channel: "gateway",
+      pricingBasisKind: "none",
+    }
+  )
+    .then((res) => {
+      assertEqual(res.status, 201, "status");
+      assertEqual(
+        res.body.resource.pricing_basis_kind,
+        "none",
+        "explicit none stored"
+      );
+    })
+    .then(() =>
+      post(
+        resourcesRoute.POST,
+        "/api/planner/resources",
+        {
+          name: "Registry basis",
+          modelId: "model_r31_c",
+          accessMethod: "free_tier",
+          channel: "web_only",
+          pricingBasisKind: "registry",
+          pricingBasisCheckedAt: NOW,
+        }
+      )
+    )
+    .then((res) => {
+      assertEqual(res.status, 201, "status");
+      assertEqual(
+        res.body.resource.pricing_basis_kind,
+        "registry",
+        "registry stored"
+      );
+      assertEqual(
+        res.body.resource.pricing_basis_checked_at,
+        NOW,
+        "the checked-at fact is stored"
+      );
+      assertEqual(
+        countRows("ai_resources"),
+        7,
+        "two new rows exist"
+      );
+    });
+});
+
+const PRICING_BASIS_ROWS = [];
+
+await check("6l. an invalid pricing basis value is refused", () => {
+  return post(
+    resourcesRoute.POST,
+    "/api/planner/resources",
+    {
+      name: "Verified usage basis",
+      modelId: "model_r31_b",
+      accessMethod: "subscription",
+      pricingBasisKind: "verified_usage",
+    }
+  ).then((res) => {
+    expectError(
+      res,
+      400,
+      "INVALID_ENUM",
+      "verified_usage is not a B1 value"
+    );
+    assertEqual(
+      countRows("ai_resources"),
+      7,
+      "no row was created"
+    );
+  });
+});
+
+await check("6m. a valid pricingVersionId is accepted and stored", () => {
+  return post(
+    resourcesRoute.POST,
+    "/api/planner/resources",
+    {
+      name: "Pinned registry card",
+      modelId: "model_r31_c",
+      accessMethod: "subscription",
+      pricingBasisKind: "registry",
+      pricingVersionId: "r34b_pricing_v1",
+    }
+  ).then((res) => {
+    assertEqual(res.status, 201, "status");
+    assertEqual(
+      res.body.resource.pricing_basis_kind,
+      "registry",
+      "kind stored"
+    );
+    assertEqual(
+      res.body.resource.pricing_version_id,
+      "r34b_pricing_v1",
+      "the pinned card is stored"
+    );
+
+    PRICING_BASIS_ROWS.push(
+      res.body.resource.id
+    );
+    assertEqual(
+      countRows("ai_resources"),
+      8,
+      "one more row exists"
+    );
+  });
+});
+
+await check("6n. an unknown pricingVersionId is a 404", () => {
+  return post(
+    resourcesRoute.POST,
+    "/api/planner/resources",
+    {
+      name: "Unknown card",
+      modelId: "model_r31_a",
+      accessMethod: "unknown",
+      pricingBasisKind: "registry",
+      pricingVersionId: "no-such-card",
+    }
+  ).then((res) => {
+    expectError(
+      res,
+      404,
+      "PRICING_VERSION_NOT_FOUND",
+      "unknown pricing version"
+    );
+    assertEqual(
+      countRows("ai_resources"),
+      8,
+      "no row was created"
+    );
+  });
+});
+
+await check("6o. pricingVersionId is refused when the basis is none", () => {
+  return post(
+    resourcesRoute.POST,
+    "/api/planner/resources",
+    {
+      name: "Card under none",
+      modelId: "model_r31_b",
+      accessMethod: "unknown",
+      pricingBasisKind: "none",
+      pricingVersionId: "r34b_pricing_v1",
+    }
+  ).then((res) => {
+    expectError(
+      res,
+      400,
+      "INVALID_PRICING_BASIS",
+      "a card pin under none"
+    );
+    assertEqual(
+      countRows("ai_resources"),
+      8,
+      "no row was created"
+    );
+  });
+});
+
+await check("6p. PATCH keeps the fact and its reference coherent", () => {
+  const pinned = PRICING_BASIS_ROWS[0];
+
+  return Promise.all([
+    /*
+     * Switching to none while the pinned card survives is refused.
+     */
+    patch(
+      resourceRoute.PATCH,
+      `/api/planner/resources/${pinned}`,
+      { pricingBasisKind: "none" },
+      { id: pinned }
+    ).then((res) => {
+      expectError(
+        res,
+        400,
+        "INVALID_PRICING_BASIS",
+        "none while a card is pinned"
+      );
+      assertEqual(
+        countRows("ai_resources"),
+        8,
+        "no row was changed"
+      );
+    }),
+    /*
+     * Clearing the pin and switching to none together is legal.
+     */
+    patch(
+      resourceRoute.PATCH,
+      `/api/planner/resources/${pinned}`,
+      {
+        pricingBasisKind: "none",
+        pricingVersionId: null,
+      },
+      { id: pinned }
+    ).then((res) => {
+      assertEqual(res.status, 200, "status");
+      assertEqual(
+        res.body.resource.pricing_basis_kind,
+        "none",
+        "kind is none"
+      );
+      assertEqual(
+        res.body.resource.pricing_version_id,
+        null,
+        "the pinned card was cleared"
+      );
+      assertEqual(
+        res.body.resource.access_method,
+        "subscription",
+        "an unsent field is untouched"
+      );
+    }),
+    /*
+     * Pinning an unknown card is refused here too.
+     */
+    patch(
+      resourceRoute.PATCH,
+      `/api/planner/resources/${pinned}`,
+      {
+        pricingBasisKind: "registry",
+        pricingVersionId: "no-such-card",
+      },
+      { id: pinned }
+    ).then((res) => {
+      expectError(
+        res,
+        404,
+        "PRICING_VERSION_NOT_FOUND",
+        "unknown card on PATCH"
+      );
+    }),
+  ]);
+});
+
+await check("6q. the pricing basis fixture rows are cleaned up", () => {
+  getDb()
+    .prepare(
+      `DELETE FROM ai_resources WHERE name IN (?, ?, ?)`
+    )
+    .run(
+      "Explicit none basis",
+      "Registry basis",
+      "Pinned registry card"
+    );
+
+  getDb()
+    .prepare(
+      `DELETE FROM pricing_versions WHERE id = ?`
+    )
+    .run("r34b_pricing_v1");
+
+  assertEqual(
+    countRows("ai_resources"),
+    5,
+    "back to the five original fixtures"
   );
 });
 
@@ -969,6 +1550,7 @@ await check("e1. server-owned and judgement fields are rejected on POST", () => 
     "rank",
     "selected",
     "recommended",
+    "owner",
     "apiKey",
   ];
 
@@ -1014,6 +1596,7 @@ await check("e2. server-owned and judgement fields are rejected on PATCH", () =>
     "rank",
     "selected",
     "recommended",
+    "owner",
   ];
 
   return forbidden.reduce(

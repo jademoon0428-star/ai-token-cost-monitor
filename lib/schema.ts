@@ -224,11 +224,40 @@ export function initDb() {
      *   tool_id is optional; NULL means direct API, no tool bound.
      *   access_method is a closed enum of how the user pays for it.
      *
+     * channel is the orthogonal reachability axis: it records how the
+     * resource is reached or measured. own_api means the user's own
+     * API key path, gateway a third-party gateway, web_only a
+     * subscription-web resource with no measurable API, unknown a
+     * path that has not been recorded. channel is a fact only in this
+     * foundation step: nothing here stores a key, opens a connection
+     * or calculates a cost.
+     *
+     * owner is the ownership layer. It is server-owned and never
+     * client-editable: 'user' for everything created through the UI,
+     * 'system' reserved for future registry / seed imported rows.
+     *
      * Entitlement is deliberately separate from cost. The columns
      * here record what the user is entitled to (such as seat limits
      * or plan names) and where that was verified. There is NO cost
      * column: a resource is not a price, and this table never stores
      * planned or actual spend.
+     *
+     * R3.4-B1 pricing basis. Three fact columns record what pricing
+     * basis this resource carries, nothing more:
+     *
+     *   pricing_basis_kind: 'none' (no pricing basis recorded) or
+     *     'registry' (priced against the registry rate card). It is a
+     *     fact-carrier only; it is never a price.
+     *   pricing_version_id: the pinned registry pricing_versions row,
+     *     or NULL for "resolve the rate card in force at estimation
+     *     time". ON DELETE SET NULL keeps the reference resolvable
+     *     when a card row is removed.
+     *   pricing_basis_checked_at: when the basis fact was recorded.
+     *
+     * These columns store no amount, no currency and no measured
+     * spend: turning a basis into a price or cost estimate is the
+     * Planner's job in a later step, and a 'verified_usage' /
+     * measured-usage basis is deliberately not a value here.
      *
      * This table also intentionally stores no score / rank / tier /
      * weight / confidence / role / selected / recommended column, and
@@ -251,6 +280,14 @@ export function initDb() {
           'unknown'
         )
       ),
+      channel TEXT NOT NULL DEFAULT 'unknown' CHECK(
+        channel IN (
+          'own_api',
+          'gateway',
+          'web_only',
+          'unknown'
+        )
+      ),
       entitlement_name TEXT,
       entitlement_source_url TEXT,
       entitlement_checked_at TEXT,
@@ -260,9 +297,23 @@ export function initDb() {
           'archived'
         )
       ),
+      owner TEXT NOT NULL DEFAULT 'user' CHECK(
+        owner IN (
+          'user',
+          'system'
+        )
+      ),
       notes TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
+      pricing_basis_kind TEXT NOT NULL DEFAULT 'none' CHECK(
+        pricing_basis_kind IN (
+          'registry',
+          'none'
+        )
+      ),
+      pricing_version_id TEXT REFERENCES pricing_versions(id) ON DELETE SET NULL,
+      pricing_basis_checked_at TEXT,
       UNIQUE(tool_id, model_id, access_method),
       FOREIGN KEY(tool_id) REFERENCES user_ai_tools(id) ON DELETE CASCADE,
       FOREIGN KEY(model_id) REFERENCES models(id) ON DELETE CASCADE
@@ -719,6 +770,8 @@ export function initDb() {
   migrateCostImportId(db);
   migrateProjectPlansPricingBasisAt(db);
   migrateProjectPlansStrategyEnum(db);
+  migrateAiResourcesOwnerChannel(db);
+  migrateAiResourcesPricingBasis(db);
 }
 
 function migrateBudgetsTable(db: ReturnType<typeof getDb>) {
@@ -1044,4 +1097,165 @@ function migrateProjectPlansStrategyEnum(
   } finally {
     db.exec("PRAGMA foreign_keys = ON;");
   }
+}
+
+/*
+ * R2 3.4-A: adds owner and channel to ai_resources.
+ *
+ * Two simple additive columns, idempotent via PRAGMA table_info. Added
+ * for tables that were created before the columns existed; fresh
+ * databases get them straight from CREATE TABLE. Existing rows are
+ * backfilled to owner='user' and channel='unknown'. Nothing here
+ * stores credentials or opens a connection: channel is a recorded
+ * fact, not a live link.
+ */
+function migrateAiResourcesOwnerChannel(
+  db: ReturnType<typeof getDb>
+) {
+  const columns = db
+    .prepare(
+      `PRAGMA table_info(ai_resources)`
+    )
+    .all() as { name: string }[];
+
+  const columnSet = new Set(
+    columns.map(
+      (column) => column.name
+    )
+  );
+
+  const alreadyHasOwner =
+    columnSet.has("owner");
+  const alreadyHasChannel =
+    columnSet.has("channel");
+
+  if (
+    alreadyHasOwner &&
+    alreadyHasChannel
+  ) {
+    return;
+  }
+
+  const transaction = () => {
+    db.exec(`BEGIN`);
+
+    try {
+      if (!alreadyHasOwner) {
+        db.exec(
+          `ALTER TABLE ai_resources
+            ADD COLUMN owner TEXT NOT NULL DEFAULT 'user'
+            CHECK(owner IN ('user', 'system'));`
+        );
+      }
+
+      if (!alreadyHasChannel) {
+        db.exec(
+          `ALTER TABLE ai_resources
+            ADD COLUMN channel TEXT NOT NULL DEFAULT 'unknown'
+            CHECK(channel IN (
+              'own_api',
+              'gateway',
+              'web_only',
+              'unknown'
+            ));`
+        );
+      }
+
+      db.exec(`COMMIT`);
+    } catch (error) {
+      try {
+        db.exec(`ROLLBACK`);
+      } catch {
+        // Ignore rollback errors so the original migration error is preserved.
+      }
+
+      throw error;
+    }
+  };
+
+  transaction();
+}
+
+/*
+ * R3.4-B1: adds the pricing-basis fact columns to ai_resources.
+ *
+ * Three additive columns, idempotent via PRAGMA table_info. Pricing
+ * basis is a recorded fact only: kind is 'none' (no pricing basis) or
+ * 'registry' (priced against the registry rate card),
+ * pricing_version_id may pin one pricing_versions row (SET NULL when
+ * that card is deleted), and pricing_basis_checked_at stamps when the
+ * fact was set. No price, currency or measured amount is stored and no
+ * rate is calculated here. A 'verified_usage' / measured-usage basis
+ * is deliberately not a value in this step.
+ */
+function migrateAiResourcesPricingBasis(
+  db: ReturnType<typeof getDb>
+) {
+  const columns = db
+    .prepare(
+      `PRAGMA table_info(ai_resources)`
+    )
+    .all() as { name: string }[];
+
+  const columnSet = new Set(
+    columns.map(
+      (column) => column.name
+    )
+  );
+
+  const alreadyHasKind =
+    columnSet.has("pricing_basis_kind");
+  const alreadyHasVersion =
+    columnSet.has("pricing_version_id");
+  const alreadyHasCheckedAt =
+    columnSet.has("pricing_basis_checked_at");
+
+  if (
+    alreadyHasKind &&
+    alreadyHasVersion &&
+    alreadyHasCheckedAt
+  ) {
+    return;
+  }
+
+  const transaction = () => {
+    db.exec(`BEGIN`);
+
+    try {
+      if (!alreadyHasKind) {
+        db.exec(
+          `ALTER TABLE ai_resources
+            ADD COLUMN pricing_basis_kind TEXT NOT NULL DEFAULT 'none'
+            CHECK(pricing_basis_kind IN ('registry', 'none'));`
+        );
+      }
+
+      if (!alreadyHasVersion) {
+        db.exec(
+          `ALTER TABLE ai_resources
+            ADD COLUMN pricing_version_id TEXT
+            REFERENCES pricing_versions(id) ON DELETE SET NULL;`
+        );
+      }
+
+      if (!alreadyHasCheckedAt) {
+        db.exec(
+          `ALTER TABLE ai_resources
+            ADD COLUMN pricing_basis_checked_at TEXT;`
+        );
+      }
+
+      db.exec(`COMMIT`);
+    } catch (error) {
+      try {
+        db.exec(`ROLLBACK`);
+      } catch {
+        // Ignore rollback errors so the original migration error is preserved.
+      }
+
+      throw error;
+    }
+  };
+
+  transaction();
 }
