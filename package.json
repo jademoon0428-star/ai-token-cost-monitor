@@ -20,6 +20,7 @@
     "smoke:planner-combinations": "node --experimental-strip-types scripts/smoke-planner-combinations.mjs",
     "smoke:planner-combination-persistence": "node --experimental-strip-types scripts/smoke-planner-combination-persistence.mjs",
     "smoke:planner-evidence": "node --experimental-strip-types scripts/smoke-planner-evidence.mjs",
+    "smoke:planner-c1": "node --experimental-strip-types scripts/smoke-planner-c1-unify.mjs",
     "smoke:ai-resources": "node --experimental-strip-types scripts/smoke-ai-resources.mjs",
     "seed:registry": "node --experimental-strip-types scripts/seed-ai-registry.mjs",
     "import:deepseek": "node scripts/import-deepseek-export.mjs",

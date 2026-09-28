@@ -60,11 +60,11 @@ import {
   type AiResourceRow,
 } from "@/lib/repositories/ai-resource-repository";
 import {
-  getRegistryPricingById,
   listAiRegistry,
   resolveRegistryPricing,
 } from "@/lib/registry/ai-registry-repository";
 import type { RegistryPricingRow } from "@/lib/registry/ai-registry-repository";
+import { resolveRegisteredPricing } from "@/lib/planner/registered-pricing";
 import { PlannerServiceError } from "@/lib/services/planner-service";
 
 export type GeneratedCombinationResult = {
@@ -139,40 +139,11 @@ function registryModelViews(): RegistryModelView[] {
   );
 }
 /*
- * The nominal pricing basis of one registered resource, decided from
- * the resource's own recorded facts (B3-1, R3.4):
- *
- *   pricing_basis_kind 'registry' + a pinned pricing_version_id: the
- *     exact pinned card is the basis. Nothing is resolved from the
- *     instant, and a card the plan instant does not fall inside is
- *     still handed over - the estimator refuses to price it, which is
- *     the honest answer.
- *   pricing_basis_kind 'registry' + no pin: the registry card in force
- *     at the shared pricing_basis_at, exactly the old behaviour.
- *   pricing_basis_kind 'none': no nominal pricing basis. No registry
- *     rate is resolved at all, so a planned cost that needs nominal
- *     pricing stays Unknown. Historical evidence is never converted
- *     into a nominal rate here or anywhere below.
+ * The nominal pricing basis of one registered resource is decided by
+ * registered-pricing.resolveRegisteredPricing (B3-1, R3.4), the single
+ * authority shared with the task-AI-options planner (R3.4-C1). This
+ * file does not re-implement the decision.
  */
-function resolveRegisteredPricing(
-  resource: AiResourceRow,
-  at: string
-): RegistryPricingRow | null {
-  if (resource.pricing_basis_kind === "none") {
-    return null;
-  }
-
-  if (resource.pricing_version_id !== null) {
-    return getRegistryPricingById(
-      resource.pricing_version_id
-    );
-  }
-
-  return resolveRegistryPricing(
-    resource.model_id,
-    at
-  );
-}
 
 /*
  * A one-line label of which nominal-pricing path B3-1 took for a

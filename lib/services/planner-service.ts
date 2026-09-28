@@ -36,6 +36,11 @@ import {
   resolveRegistryPricing,
 } from "@/lib/registry/ai-registry-repository";
 import { generatePlannerCandidates } from "@/lib/planner/candidate-generator";
+import { resolveRegisteredPricing } from "@/lib/planner/registered-pricing";
+import {
+  listAiResources,
+  type AiResourceRow,
+} from "@/lib/repositories/ai-resource-repository";
 
 /*
  * v1.4-C AI Project Planner service.
@@ -1199,6 +1204,37 @@ export function generateProjectTaskAiOptions(
     (provider) => provider.models
   );
 
+  /*
+   * R3.4-C1: the same pricing basis the combination plans apply
+   * (R3.4-B3) must hold at this entry point too. A model the user owns
+   * as an active registered resource is priced through that resource's
+   * own recorded basis via registered-pricing.resolveRegisteredPricing
+   * - the single authority shared with combination-service. A model
+   * with no active registered resource keeps the plain registry
+   * behaviour. Only active resources count; an archived resource
+   * changes nothing.
+   *
+   * Candidate rows are per model, while a model may be owned by
+   * several active resources. The first active resource for a model
+   * (listAiResources order: created_at, then id) decides, so the whole
+   * generation is deterministic.
+   */
+  const registeredByModelId = new Map<
+    string,
+    AiResourceRow
+  >();
+
+  for (const resource of listAiResources({
+    status: "active",
+  })) {
+    if (!registeredByModelId.has(resource.model_id)) {
+      registeredByModelId.set(
+        resource.model_id,
+        resource
+      );
+    }
+  }
+
   const generated = generatePlannerCandidates({
     task: {
       category: projectTask.category,
@@ -1219,11 +1255,19 @@ export function generateProjectTaskAiOptions(
     models,
     /*
      * Injected rather than reimplemented. The repository's resolver
-     * is the single authority on which rate applies at an instant;
-     * this function must never re-derive one.
+     * is the single authority on which rate applies at an instant; a
+     * registered resource routes through its own B3 basis first. This
+     * function must never re-derive either one.
      */
-    pricingResolver: (modelId, at) =>
-      resolveRegistryPricing(modelId, at),
+    pricingResolver: (modelId, at) => {
+      const registered = registeredByModelId.get(
+        modelId
+      );
+
+      return registered === undefined
+        ? resolveRegistryPricing(modelId, at)
+        : resolveRegisteredPricing(registered, at);
+    },
   });
 
   const createdAt = new Date().toISOString();
