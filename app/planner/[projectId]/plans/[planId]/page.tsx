@@ -64,6 +64,34 @@ type PlanResourceAssignmentRow = {
   rationale: string | null;
   created_at: string;
   updated_at: string;
+  /*
+   * B2 additive display context: the verified historical usage
+   * evidence of the assignment's model, one entry per currency. It is
+   * never a nominal price and never participates in planned cost.
+   */
+  evidenceSummary?: VerifiedUsageEvidence[] | null;
+};
+
+/*
+ * The verified usage evidence shape, mirroring the API payload. A
+ * model can have several entries when its evidence spans several
+ * currencies; they are never combined.
+ */
+type VerifiedUsageEvidence = {
+  providerId: string;
+  modelId: string;
+  currency: string;
+  recordCount: number;
+  exportCount: number | null;
+  firstTimestamp: string;
+  lastTimestamp: string;
+  totalCostMicros: number;
+  inputTokens: number;
+  outputTokens: number;
+  cachedTokens: number;
+  reasoningTokens: number;
+  sources: string[];
+  provenance: "source_reported";
 };
 
 /*
@@ -183,6 +211,42 @@ const hintStyle = {
 
 function formatDate(value: string): string {
   return value.slice(0, 10);
+}
+
+function currencySymbol(currency: string): string {
+  if (currency === "CNY") {
+    return "¥";
+  }
+
+  if (currency === "USD") {
+    return "$";
+  }
+
+  return `${currency} `;
+}
+
+/*
+ * Compact token total for the evidence line (for example 176.2M).
+ * Input and output tokens are the counted ask; cached and reasoning
+ * tokens are sub-buckets of those, so they are never added again.
+ */
+function formatTokenTotal(evidence: VerifiedUsageEvidence): string {
+  const total =
+    evidence.inputTokens + evidence.outputTokens;
+
+  if (total >= 1_000_000_000) {
+    return `${Number((total / 1_000_000_000).toFixed(1))}B`;
+  }
+
+  if (total >= 1_000_000) {
+    return `${Number((total / 1_000_000).toFixed(1))}M`;
+  }
+
+  if (total >= 1_000) {
+    return `${Number((total / 1_000).toFixed(1))}K`;
+  }
+
+  return String(total);
 }
 
 function Field({
@@ -1473,6 +1537,14 @@ export default function PlanDetailPage() {
                       ? `${formatMicros(assignment.planned_cost_min_micros)} – ${formatMicros(assignment.planned_cost_max_micros)} ${assignment.planned_cost_currency}`
                       : "Unknown";
 
+                  const costUnknown =
+                    assignment.planned_cost_min_micros ===
+                      null ||
+                    assignment.planned_cost_max_micros ===
+                      null ||
+                    assignment.planned_cost_currency ===
+                      null;
+
                   const time =
                     assignment.planned_time_min_minutes !==
                       null &&
@@ -1564,6 +1636,88 @@ export default function PlanDetailPage() {
                           Basis:{" "}
                           {assignment.cost_basis}
                         </p>
+                      ) : null}
+
+                      {assignment.evidenceSummary &&
+                      assignment.evidenceSummary.length > 0 ? (
+                        <div
+                          style={{
+                            display: "grid",
+                            gap: 4,
+                            color: "#666",
+                            fontSize: 12,
+                            lineHeight: 1.5,
+                          }}
+                        >
+                          {costUnknown ? (
+                            <div>
+                              <span
+                                style={{
+                                  fontWeight: 600,
+                                }}
+                              >
+                                Nominal price:
+                              </span>{" "}
+                              No registry pricing
+                              available.
+                            </div>
+                          ) : null}
+
+                          <div>
+                            <span
+                              style={{
+                                fontWeight: 600,
+                              }}
+                            >
+                              Verified usage
+                              evidence:
+                            </span>
+                          </div>
+
+                          {assignment.evidenceSummary.map(
+                            (evidence) => {
+                              const sourceLabel =
+                                evidence.sources.length >
+                                0
+                                  ? evidence.sources.join(
+                                      " / "
+                                    )
+                                  : "verified";
+
+                              return (
+                                <div
+                                  key={evidence.currency}
+                                >
+                                  {evidence.recordCount}{" "}
+                                  records ·{" "}
+                                  {currencySymbol(
+                                    evidence.currency
+                                  )}
+                                  {formatMicros(
+                                    evidence.totalCostMicros
+                                  )}{" "}
+                                  ·{" "}
+                                  {formatTokenTotal(
+                                    evidence
+                                  )}{" "}
+                                  tokens
+                                  <br />
+                                  {formatDate(
+                                    evidence.firstTimestamp
+                                  )}{" "}
+                                  →{" "}
+                                  {formatDate(
+                                    evidence.lastTimestamp
+                                  )}
+                                  <br />
+                                  Source:{" "}
+                                  {sourceLabel} /{" "}
+                                  {evidence.provenance}
+                                </div>
+                              );
+                            }
+                          )}
+                        </div>
                       ) : null}
                     </div>
                   );
