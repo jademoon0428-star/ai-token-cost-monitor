@@ -44,6 +44,7 @@ export type ProjectPlanRow = {
   version: number;
   strategy: string;
   summary: string | null;
+  pricing_basis_at: string | null;
   created_at: string;
 };
 
@@ -85,6 +86,78 @@ export type ProjectTaskAiOptionRow = {
   updated_at: string;
 };
 
+/*
+ * One persisted combination assignment (R2 3.3-B).
+ *
+ * resource_source says how to read the resource reference:
+ *
+ *   registered  -> ai_resource_id  (the user-owned ai_resources row)
+ *   registry    -> registry_model_id (a models row that only exists
+ *                                     in the AI Registry)
+ *
+ * Exactly one of the two ids is set, enforced by the schema CHECK and
+ * by the "exactly one of aiResourceId / registryModelId" validation
+ * below.
+ */
+export type PlanResourceAssignmentRow = {
+  id: string;
+  plan_id: string;
+  project_task_id: string;
+  ai_resource_id: string | null;
+  registry_model_id: string | null;
+  resource_source: string;
+  role: string;
+  role_source: string;
+  is_primary: number;
+  sequence: number;
+  planned_cost_min_micros: number | null;
+  planned_cost_max_micros: number | null;
+  planned_cost_currency: string | null;
+  planned_time_min_minutes: number | null;
+  planned_time_max_minutes: number | null;
+  fit_status: string;
+  cost_basis: string | null;
+  rationale: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CreatePlanResourceAssignmentInput = {
+  id: string;
+  planId: string;
+  projectTaskId: string;
+  aiResourceId?: string | null;
+  registryModelId?: string | null;
+  resourceSource: "registered" | "registry";
+  role: string;
+  roleSource: string;
+  isPrimary?: 0 | 1;
+  sequence: number;
+  plannedCostMinMicros?: number | null;
+  plannedCostMaxMicros?: number | null;
+  plannedCostCurrency?: string | null;
+  plannedTimeMinMinutes?: number | null;
+  plannedTimeMaxMinutes?: number | null;
+  fitStatus: string;
+  costBasis?: string | null;
+  rationale?: string | null;
+  createdAt: string;
+};
+
+export type CreateCombinationPlanInput = {
+  id: string;
+  strategy: string;
+  summary?: string | null;
+  pricingBasisAt?: string | null;
+  assignments: CreatePlanResourceAssignmentInput[];
+};
+
+export type SaveCombinationPlansInput = {
+  projectId: string;
+  createdAt: string;
+  plans: CreateCombinationPlanInput[];
+};
+
 export type CreateProjectInput = {
   id: string;
   name: string;
@@ -117,6 +190,7 @@ export type CreateProjectPlanInput = {
   version?: number;
   strategy: ProjectPreference;
   summary?: string | null;
+  pricingBasisAt?: string | null;
   createdAt: string;
 };
 
@@ -229,6 +303,7 @@ const PLAN_COLUMNS = `
   version,
   strategy,
   summary,
+  pricing_basis_at,
   created_at
 `;
 
@@ -265,6 +340,29 @@ const AI_OPTION_COLUMNS = `
   fit_status,
   excluded_reason,
   pricing_basis,
+  rationale,
+  created_at,
+  updated_at
+`;
+
+const ASSIGNMENT_COLUMNS = `
+  id,
+  plan_id,
+  project_task_id,
+  ai_resource_id,
+  registry_model_id,
+  resource_source,
+  role,
+  role_source,
+  is_primary,
+  sequence,
+  planned_cost_min_micros,
+  planned_cost_max_micros,
+  planned_cost_currency,
+  planned_time_min_minutes,
+  planned_time_max_minutes,
+  fit_status,
+  cost_basis,
   rationale,
   created_at,
   updated_at
@@ -463,9 +561,10 @@ export function createProjectPlan(
           version,
           strategy,
           summary,
+          pricing_basis_at,
           created_at
         )
-        VALUES (?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
       `
     )
     .run(
@@ -474,6 +573,7 @@ export function createProjectPlan(
       input.version ?? 1,
       input.strategy,
       input.summary ?? null,
+      input.pricingBasisAt ?? null,
       input.createdAt
     );
 }
@@ -794,14 +894,18 @@ export function linkProjectTaskToExecutionTask(
   return getProjectTask(id);
 }
 
-export function createProjectTaskAiOption(
+/*
+ * The one INSERT statement for this table.
+ *
+ * Kept private so the single-row create and the batch replace below
+ * cannot drift apart in column order. Nothing else writes here.
+ */
+function insertProjectTaskAiOption(
   input: CreateProjectTaskAiOptionInput
 ): void {
-  initDb();
-
   getDb()
     .prepare(
-      `
+    `
         INSERT INTO project_task_ai_options
         (
           id,
@@ -823,7 +927,7 @@ export function createProjectTaskAiOption(
         )
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `
-    )
+  )
     .run(
       input.id,
       input.projectTaskId,
@@ -842,6 +946,104 @@ export function createProjectTaskAiOption(
       input.createdAt,
       input.createdAt
     );
+}
+
+function deleteOptionsForTask(
+  projectTaskId: string
+): number {
+  return Number(
+    getDb()
+      .prepare(
+      `
+        DELETE FROM project_task_ai_options
+        WHERE project_task_id = ?
+      `
+    )
+      .run(projectTaskId).changes
+  );
+}
+
+export function createProjectTaskAiOption(
+  input: CreateProjectTaskAiOptionInput
+): void {
+  initDb();
+
+  insertProjectTaskAiOption(input);
+}
+
+/*
+ * Removes every candidate recorded against one planned step and
+ * returns how many rows went away.
+ *
+ * Scope is deliberately one planned step and nothing else: no other
+ * step, no other plan, no other project, and never the models,
+ * capabilities, pricing or execution tables. Nothing outside this
+ * table points at an option id, so removing rows here cannot leave a
+ * dangling reference anywhere else.
+ */
+export function deleteProjectTaskAiOptions(
+  projectTaskId: string
+): number {
+  initDb();
+
+  return deleteOptionsForTask(projectTaskId);
+}
+
+/*
+ * Swaps one planned step's entire candidate set for a new one, as a
+ * single atomic unit.
+ *
+ * The table has no generation or version column and its unique index
+ * is (project_task_id, model_id, COALESCE(tool_id, '')), so a second
+ * generation cannot be appended alongside the first: the same model
+ * would collide. Replace is therefore the only shape the schema
+ * supports, and it is also the only one that leaves a readable
+ * answer to "what are this step's candidates".
+ *
+ * Because the delete and the inserts share one transaction, a
+ * failure part way through the batch leaves the previous complete set
+ * exactly as it was. A half-written candidate list is not a state
+ * this function can produce.
+ *
+ * Every option must belong to projectTaskId. Passing a row for a
+ * different step is refused before the transaction opens, so a batch
+ * can never scatter options across steps.
+ */
+export function replaceProjectTaskAiOptions(
+  projectTaskId: string,
+  options: CreateProjectTaskAiOptionInput[]
+): void {
+  initDb();
+
+  for (const option of options) {
+    if (option.projectTaskId !== projectTaskId) {
+      throw new Error(
+        `project task ai option "${option.id}" belongs to project task "${option.projectTaskId}", not "${projectTaskId}"`
+      );
+    }
+  }
+
+  const db = getDb();
+
+  db.exec("BEGIN");
+
+  try {
+    deleteOptionsForTask(projectTaskId);
+
+    for (const option of options) {
+      insertProjectTaskAiOption(option);
+    }
+
+    db.exec("COMMIT");
+  } catch (error) {
+    try {
+      db.exec("ROLLBACK");
+    } catch {
+      // Ignore rollback errors so the original error is preserved.
+    }
+
+    throw error;
+  }
 }
 
 export function getProjectTaskAiOption(
@@ -940,4 +1142,216 @@ export function selectProjectTaskAiOption(
 
     throw error;
   }
+}
+
+function requireSingleResourceReference(
+  input: CreatePlanResourceAssignmentInput
+): void {
+  const aiSet = input.aiResourceId != null;
+  const registrySet = input.registryModelId != null;
+
+  if (input.resourceSource === "registered" && !aiSet) {
+    throw new Error(
+      `plan resource assignment "${input.id}" is registered but carries no aiResourceId`
+    );
+  }
+
+  if (input.resourceSource === "registry" && !registrySet) {
+    throw new Error(
+      `plan resource assignment "${input.id}" is registry but carries no registryModelId`
+    );
+  }
+
+  if (input.resourceSource === "registered" && registrySet) {
+    throw new Error(
+      `plan resource assignment "${input.id}" is registered but also carries a registryModelId`
+    );
+  }
+
+  if (input.resourceSource === "registry" && aiSet) {
+    throw new Error(
+      `plan resource assignment "${input.id}" is registry but also carries an aiResourceId`
+    );
+  }
+}
+
+/*
+ * Persists one R2 3.3-B combination plan with all of its assignments.
+ *
+ * Like every Planner table, plan_resource_assignments is a plain store:
+ * no cost, fit or ordering is derived here. The caller (the combination
+ * service) is the one that validated and evaluated; this function only
+ * writes what it is given, inside a single transaction.
+ */
+function insertPlanResourceAssignment(
+  input: CreatePlanResourceAssignmentInput,
+  planId: string,
+  createdAt: string
+): void {
+  requireSingleResourceReference(input);
+
+  getDb()
+    .prepare(
+      `
+        INSERT INTO plan_resource_assignments
+        (
+          id,
+          plan_id,
+          project_task_id,
+          ai_resource_id,
+          registry_model_id,
+          resource_source,
+          role,
+          role_source,
+          is_primary,
+          sequence,
+          planned_cost_min_micros,
+          planned_cost_max_micros,
+          planned_cost_currency,
+          planned_time_min_minutes,
+          planned_time_max_minutes,
+          fit_status,
+          cost_basis,
+          rationale,
+          created_at,
+          updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `
+    )
+    .run(
+      input.id,
+      planId,
+      input.projectTaskId,
+      input.aiResourceId ?? null,
+      input.registryModelId ?? null,
+      input.resourceSource,
+      input.role,
+      input.roleSource,
+      input.isPrimary ?? 0,
+      input.sequence,
+      input.plannedCostMinMicros ?? null,
+      input.plannedCostMaxMicros ?? null,
+      input.plannedCostCurrency ?? null,
+      input.plannedTimeMinMinutes ?? null,
+      input.plannedTimeMaxMinutes ?? null,
+      input.fitStatus,
+      input.costBasis ?? null,
+      input.rationale ?? null,
+      input.createdAt ?? createdAt,
+      input.createdAt ?? createdAt
+    );
+}
+
+/*
+ * Persists a whole combination evaluation as one atomic unit.
+ *
+ * All plans of the evaluation share one transaction: either every plan
+ * and every assignment is written, or none is. The versions are
+ * assigned here and never by the caller - each plan gets one more than
+ * the highest version the project already has, which keeps
+ * UNIQUE(project_id, version) satisfied without the client ever
+ * choosing a version.
+ *
+ * Plans are immutable, so a regeneration never touches an old plan:
+ * it only appends the next batch of versions.
+ */
+export function saveCombinationPlans(
+  input: SaveCombinationPlansInput
+): void {
+  initDb();
+
+  const db = getDb();
+
+  db.exec("BEGIN");
+
+  try {
+    const highest = db
+      .prepare(
+        `
+          SELECT MAX(version) AS highest
+          FROM project_plans
+          WHERE project_id = ?
+        `
+      )
+      .get(input.projectId) as
+      | { highest: number | null }
+      | undefined;
+
+    let nextVersion = (highest?.highest ?? 0) + 1;
+
+    for (const plan of input.plans) {
+      db.prepare(
+        `
+          INSERT INTO project_plans
+          (
+            id,
+            project_id,
+            version,
+            strategy,
+            summary,
+            pricing_basis_at,
+            created_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `
+      ).run(
+        plan.id,
+        input.projectId,
+        nextVersion,
+        plan.strategy,
+        plan.summary ?? null,
+        plan.pricingBasisAt ?? null,
+        input.createdAt
+      );
+
+      nextVersion += 1;
+
+      for (const assignment of plan.assignments) {
+        if (assignment.planId !== plan.id) {
+          throw new Error(
+            `plan resource assignment "${assignment.id}" belongs to plan "${assignment.planId}", not "${plan.id}"`
+          );
+        }
+
+        insertPlanResourceAssignment(
+          assignment,
+          plan.id,
+          input.createdAt
+        );
+      }
+    }
+
+    db.exec("COMMIT");
+  } catch (error) {
+    try {
+      db.exec("ROLLBACK");
+    } catch {
+      // Ignore rollback errors so the original error is preserved.
+    }
+
+    throw error;
+  }
+}
+
+/*
+ * Lists the persisted assignments of one combination plan in the
+ * deterministic evaluation order (sequence, then id as a stable
+ * tie-break).
+ */
+export function listPlanResourceAssignments(
+  planId: string
+): PlanResourceAssignmentRow[] {
+  initDb();
+
+  return getDb()
+    .prepare(
+      `
+        SELECT ${ASSIGNMENT_COLUMNS}
+        FROM plan_resource_assignments
+        WHERE plan_id = ?
+        ORDER BY sequence ASC, id ASC
+      `
+    )
+    .all(planId) as PlanResourceAssignmentRow[];
 }

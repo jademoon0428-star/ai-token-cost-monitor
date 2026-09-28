@@ -14,6 +14,12 @@
     "smoke:registry": "node --experimental-strip-types scripts/smoke-registry.mjs",
     "smoke:planner": "node --experimental-strip-types scripts/smoke-planner.mjs",
     "smoke:planner-api": "node --experimental-strip-types scripts/smoke-planner-api.mjs",
+    "smoke:planner-estimator": "node --experimental-strip-types scripts/smoke-planner-estimator.mjs",
+    "smoke:planner-candidates": "node --experimental-strip-types scripts/smoke-planner-candidates.mjs",
+    "smoke:planner-persistence": "node --experimental-strip-types scripts/smoke-planner-persistence.mjs",
+    "smoke:planner-combinations": "node --experimental-strip-types scripts/smoke-planner-combinations.mjs",
+    "smoke:planner-combination-persistence": "node --experimental-strip-types scripts/smoke-planner-combination-persistence.mjs",
+    "smoke:ai-resources": "node --experimental-strip-types scripts/smoke-ai-resources.mjs",
     "seed:registry": "node --experimental-strip-types scripts/seed-ai-registry.mjs",
     "import:deepseek": "node scripts/import-deepseek-export.mjs",
     "sync:deepseek": "node scripts/sync-deepseek.mjs",
@@ -22,6 +28,7 @@
   },
   "dependencies": {
     "next": "16.3.4",
+    "playwright": "^1.63.0",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },

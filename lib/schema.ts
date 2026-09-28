@@ -214,6 +214,76 @@ export function initDb() {
     );
 
     /*
+     * R3.1 ai_resources.
+     *
+     * The "what the user owns" layer for the AI Resource Planner:
+     * one row is one way the user can access one model (directly, or
+     * through one user_ai_tool).
+     *
+     *   model_id is always set: a resource always names a model.
+     *   tool_id is optional; NULL means direct API, no tool bound.
+     *   access_method is a closed enum of how the user pays for it.
+     *
+     * Entitlement is deliberately separate from cost. The columns
+     * here record what the user is entitled to (such as seat limits
+     * or plan names) and where that was verified. There is NO cost
+     * column: a resource is not a price, and this table never stores
+     * planned or actual spend.
+     *
+     * This table also intentionally stores no score / rank / tier /
+     * weight / confidence / role / selected / recommended column, and
+     * no api_key / token / password / balance / quota / credential:
+     * resources are inventory, not judgements and not secrets.
+     *
+     * status is a closed enum. Rows are archived, never deleted, so
+     * historical references stay resolvable.
+     */
+    CREATE TABLE IF NOT EXISTS ai_resources (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      tool_id TEXT,
+      model_id TEXT NOT NULL,
+      access_method TEXT NOT NULL CHECK(
+        access_method IN (
+          'free_tier',
+          'subscription',
+          'pay_as_you_go',
+          'unknown'
+        )
+      ),
+      entitlement_name TEXT,
+      entitlement_source_url TEXT,
+      entitlement_checked_at TEXT,
+      status TEXT NOT NULL DEFAULT 'active' CHECK(
+        status IN (
+          'active',
+          'archived'
+        )
+      ),
+      notes TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(tool_id, model_id, access_method),
+      FOREIGN KEY(tool_id) REFERENCES user_ai_tools(id) ON DELETE CASCADE,
+      FOREIGN KEY(model_id) REFERENCES models(id) ON DELETE CASCADE
+    );
+
+    /*
+     * At most one resource per (tool, model, access method). This is
+     * an expression index because SQLite treats NULLs as distinct in
+     * a plain UNIQUE constraint, which would otherwise let the same
+     * model and access method be added twice with no tool. COALESCE
+     * maps NULL to '' so "direct API" collapses to a single value and
+     * stays distinct from any real tool_id.
+     */
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_resources_unique
+      ON ai_resources(
+        COALESCE(tool_id, ''),
+        model_id,
+        access_method
+      );
+
+    /*
      * v1.4-C AI Project Planner (data layer only).
      *
      * Everything in this block is PLANNED data: intent, estimates and
@@ -272,6 +342,19 @@ export function initDb() {
      * A plan is one version of the approach for a project. Versions
      * are immutable rows; a new version is a new row, never an
      * update of an old one.
+     *
+     * strategy holds whichever vocabulary a plan belongs to. The
+     * original three are the R2 project strategies
+     * (cost_first / time_first / balanced); the extra five are the
+     * R2 3.3-A whole-project combination strategies
+     * (existing / cost_conscious / mixed / subscription /
+     * registry_expanded). The two vocabularies share one column
+     * because a plan row is just one version of an approach.
+     *
+     * pricing_basis_at is the single instant at which the pricing for
+     * all combination plans of a project was resolved. It is shared
+     * across those plans; NULL means "old data, fall back to
+     * created_at" and is never read as "unpriced".
      */
     CREATE TABLE IF NOT EXISTS project_plans (
       id TEXT PRIMARY KEY,
@@ -281,10 +364,16 @@ export function initDb() {
         strategy IN (
           'cost_first',
           'time_first',
-          'balanced'
+          'balanced',
+          'existing',
+          'cost_conscious',
+          'mixed',
+          'subscription',
+          'registry_expanded'
         )
       ),
       summary TEXT,
+      pricing_basis_at TEXT,
       created_at TEXT NOT NULL,
       UNIQUE(project_id, version),
       FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
@@ -437,6 +526,15 @@ export function initDb() {
     CREATE INDEX IF NOT EXISTS idx_user_ai_tools_category
       ON user_ai_tools(category);
 
+    CREATE INDEX IF NOT EXISTS idx_ai_resources_status
+      ON ai_resources(status);
+
+    CREATE INDEX IF NOT EXISTS idx_ai_resources_model
+      ON ai_resources(model_id);
+
+    CREATE INDEX IF NOT EXISTS idx_ai_resources_tool
+      ON ai_resources(tool_id);
+
     CREATE INDEX IF NOT EXISTS idx_pricing_provider_model
       ON pricing_versions(provider_id, model);
 
@@ -457,6 +555,139 @@ export function initDb() {
 
     CREATE INDEX IF NOT EXISTS idx_project_task_ai_options_tool
       ON project_task_ai_options(tool_id);
+
+    /*
+     * R2 3.3-B plan_resource_assignments.
+     *
+     * One persisted row per (plan, planned step, role, resource): the
+     * R2 3.3-A whole-project combination evaluation, stored so a
+     * generated plan can be re-read later without regenerating it.
+     *
+     * A resource is referenced exactly one way, never both, and
+     * resource_source says which way in plain text:
+     *
+     *   registered  -> ai_resource_id  (a row in ai_resources: the
+     *                                   "what the user owns" layer)
+     *   registry    -> registry_model_id (a row in models that only
+     *                                   exists in the AI Registry)
+     *
+     * A registry-only resource is deliberately NOT materialised into
+     * ai_resources. ai_resources is the user-owned inventory and
+     * records entitlement and access the registry does not have;
+     * writing a fake row there would present a registry model as
+     * something the user owns and is entitled to, which is a lie.
+     * The two id columns and their COALESCE expression index are the
+     * whole representation of that boundary.
+     *
+     * planned_cost_* follow the same rule as every Planner money
+     * column: all three are NULL together when the cost is unknown,
+     * never 0 and never an assumed currency, and no exchange happens.
+     * cost_basis states the basis of the persisted (out-of-pocket)
+     * cost, e.g. why a confirmed entitlement makes it zero.
+     *
+     * planned_time_* are the step's own time range, copied onto every
+     * assignment of that step, because time is a property of the step
+     * and not of the resource.
+     *
+     * is_primary stays 0. Nothing here is ranked, recommended or
+     * selected: the combination evaluation never picks a winner.
+     */
+    CREATE TABLE IF NOT EXISTS plan_resource_assignments (
+      id TEXT PRIMARY KEY,
+      plan_id TEXT NOT NULL,
+      project_task_id TEXT NOT NULL,
+      ai_resource_id TEXT,
+      registry_model_id TEXT,
+      resource_source TEXT NOT NULL CHECK(
+        resource_source IN (
+          'registered',
+          'registry'
+        )
+      ),
+      role TEXT NOT NULL CHECK(
+        role IN (
+          'implementer',
+          'reviewer',
+          'researcher',
+          'designer',
+          'assistant'
+        )
+      ),
+      role_source TEXT NOT NULL CHECK(
+        role_source IN (
+          'default_from_category',
+          'user'
+        )
+      ),
+      is_primary INTEGER NOT NULL DEFAULT 0 CHECK(
+        is_primary IN (0, 1)
+      ),
+      sequence INTEGER NOT NULL,
+      planned_cost_min_micros INTEGER,
+      planned_cost_max_micros INTEGER,
+      planned_cost_currency TEXT,
+      planned_time_min_minutes INTEGER,
+      planned_time_max_minutes INTEGER,
+      fit_status TEXT NOT NULL CHECK(
+        fit_status IN (
+          'meets',
+          'below_minimum',
+          'unknown'
+        )
+      ),
+      cost_basis TEXT,
+      rationale TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      CHECK(
+        (resource_source = 'registered'
+          AND ai_resource_id IS NOT NULL
+          AND registry_model_id IS NULL)
+        OR
+        (resource_source = 'registry'
+          AND registry_model_id IS NOT NULL
+          AND ai_resource_id IS NULL)
+      ),
+      UNIQUE(plan_id, project_task_id, ai_resource_id, role),
+      FOREIGN KEY(plan_id) REFERENCES project_plans(id) ON DELETE CASCADE,
+      FOREIGN KEY(project_task_id) REFERENCES project_tasks(id) ON DELETE CASCADE,
+      FOREIGN KEY(ai_resource_id) REFERENCES ai_resources(id) ON DELETE CASCADE,
+      FOREIGN KEY(registry_model_id) REFERENCES models(id) ON DELETE CASCADE
+    );
+
+    /*
+     * At most one assignment per (plan, planned step, resource, role).
+     *
+     * This is an expression index because ai_resource_id and
+     * registry_model_id are nullable, and SQLite treats NULLs as
+     * distinct in a plain UNIQUE constraint, which would let two
+     * registry-only assignments for the same (step, role) both slip
+     * through with NULL ai_resource_id. COALESCE maps NULL to '' so
+     * both id columns collapse to a single value and the two resource
+     * families cannot collide with each other either. The plain
+     * UNIQUE(plan_id, project_task_id, ai_resource_id, role) from the
+     * original DDL is kept as well.
+     */
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_plan_resource_assignments_unique
+      ON plan_resource_assignments(
+        plan_id,
+        project_task_id,
+        COALESCE(ai_resource_id, ''),
+        COALESCE(registry_model_id, ''),
+        role
+      );
+
+    CREATE INDEX IF NOT EXISTS idx_plan_resource_assignments_plan
+      ON plan_resource_assignments(plan_id);
+
+    CREATE INDEX IF NOT EXISTS idx_plan_resource_assignments_task
+      ON plan_resource_assignments(project_task_id);
+
+    CREATE INDEX IF NOT EXISTS idx_plan_resource_assignments_ai_resource
+      ON plan_resource_assignments(ai_resource_id);
+
+    CREATE INDEX IF NOT EXISTS idx_plan_resource_assignments_registry_model
+      ON plan_resource_assignments(registry_model_id);
 
     /*
      * At most one option per (planned step, model, tool). This is an
@@ -486,6 +717,8 @@ export function initDb() {
   migrateCostRecordsProvenance(db);
   migrateUsageImportId(db);
   migrateCostImportId(db);
+  migrateProjectPlansPricingBasisAt(db);
+  migrateProjectPlansStrategyEnum(db);
 }
 
 function migrateBudgetsTable(db: ReturnType<typeof getDb>) {
@@ -679,4 +912,136 @@ function migrateCostImportId(db: ReturnType<typeof getDb>) {
     `ALTER TABLE cost_records
       ADD COLUMN import_id TEXT;`
   );
+}
+
+/*
+ * R2 3.3-B: adds pricing_basis_at to project_plans.
+ *
+ * Simple additive column, idempotent via PRAGMA table_info. Added for
+ * tables that were created before the column existed; fresh databases
+ * get it straight from CREATE TABLE.
+ */
+function migrateProjectPlansPricingBasisAt(
+  db: ReturnType<typeof getDb>
+) {
+  const columns = db
+    .prepare(
+      `PRAGMA table_info(project_plans)`
+    )
+    .all() as { name: string }[];
+
+  const alreadyHasPricingBasisAt =
+    columns.some(
+      (column) =>
+        column.name === "pricing_basis_at"
+    );
+
+  if (alreadyHasPricingBasisAt) {
+    return;
+  }
+
+  db.exec(
+    `ALTER TABLE project_plans
+      ADD COLUMN pricing_basis_at TEXT;`
+  );
+}
+
+/*
+ * R2 3.3-B: widens project_plans.strategy to the combination
+ * strategies.
+ *
+ * SQLite cannot alter a CHECK constraint in place, so the table is
+ * rebuilt the same way migrateBudgetsTable rebuilds budgets. This one
+ * is heavier because project_plans is referenced by other tables:
+ * foreign keys are disabled only for the rebuild window, and because
+ * every row keeps its id, every existing reference stays valid before,
+ * during and after the swap and no cascade can ever fire.
+ */
+function migrateProjectPlansStrategyEnum(
+  db: ReturnType<typeof getDb>
+) {
+  const existingSql = db
+    .prepare(
+      `SELECT sql
+       FROM sqlite_master
+       WHERE type = 'table'
+         AND name = 'project_plans'`
+    )
+    .get() as { sql?: string } | undefined;
+
+  const tableSql = existingSql?.sql ?? "";
+
+  if (
+    tableSql.includes("'registry_expanded'")
+  ) {
+    return;
+  }
+
+  db.exec("PRAGMA foreign_keys = OFF;");
+  db.exec("BEGIN");
+
+  try {
+    db.exec(`
+      CREATE TABLE project_plans_new (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        version INTEGER NOT NULL DEFAULT 1,
+        strategy TEXT NOT NULL CHECK(
+          strategy IN (
+            'cost_first',
+            'time_first',
+            'balanced',
+            'existing',
+            'cost_conscious',
+            'mixed',
+            'subscription',
+            'registry_expanded'
+          )
+        ),
+        summary TEXT,
+        pricing_basis_at TEXT,
+        created_at TEXT NOT NULL,
+        UNIQUE(project_id, version),
+        FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+      );
+
+      INSERT INTO project_plans_new (
+        id,
+        project_id,
+        version,
+        strategy,
+        summary,
+        pricing_basis_at,
+        created_at
+      )
+      SELECT
+        id,
+        project_id,
+        version,
+        strategy,
+        summary,
+        NULL,
+        created_at
+      FROM project_plans;
+
+      DROP TABLE project_plans;
+
+      ALTER TABLE project_plans_new RENAME TO project_plans;
+
+      CREATE INDEX IF NOT EXISTS idx_project_plans_project
+        ON project_plans(project_id);
+    `);
+
+    db.exec("COMMIT");
+  } catch (error) {
+    try {
+      db.exec("ROLLBACK");
+    } catch {
+      // Ignore rollback errors so the original error is preserved.
+    }
+
+    throw error;
+  } finally {
+    db.exec("PRAGMA foreign_keys = ON;");
+  }
 }

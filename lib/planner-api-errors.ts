@@ -29,6 +29,7 @@ const NOT_FOUND_CODES: ReadonlySet<string> = new Set([
   "PLAN_NOT_FOUND",
   "PROJECT_TASK_NOT_FOUND",
   "AI_OPTION_NOT_FOUND",
+  "AI_RESOURCE_NOT_FOUND",
   "TASK_NOT_FOUND",
   "MODEL_NOT_FOUND",
   "TOOL_NOT_FOUND",
@@ -42,6 +43,7 @@ const NOT_FOUND_CODES: ReadonlySet<string> = new Set([
  */
 const CONFLICT_CODES: ReadonlySet<string> = new Set([
   "INVALID_STATUS_TRANSITION",
+  "DUPLICATE_AI_RESOURCE",
 ]);
 
 export function plannerErrorStatus(

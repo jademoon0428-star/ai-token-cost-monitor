@@ -7,12 +7,15 @@ import {
   useState,
 } from "react";
 
+import TaskAiOptions from "@/components/planner/task-ai-options";
+
 type ProjectPlanRow = {
   id: string;
   project_id: string;
   version: number;
   strategy: string;
   summary: string | null;
+  pricing_basis_at: string | null;
   created_at: string;
 };
 
@@ -31,6 +34,34 @@ type ProjectTaskRow = {
   estimated_output_tokens_min: number | null;
   estimated_output_tokens_max: number | null;
   status: string;
+  created_at: string;
+  updated_at: string;
+};
+
+/*
+ * One stored resource assignment of a plan, exactly as the repository
+ * returns it. For each step one of ai_resource_id / registry_model_id
+ * is set, and is_primary is always 0: these are facts, never a pick.
+ */
+type PlanResourceAssignmentRow = {
+  id: string;
+  plan_id: string;
+  project_task_id: string;
+  ai_resource_id: string | null;
+  registry_model_id: string | null;
+  resource_source: string;
+  role: string;
+  role_source: string;
+  is_primary: number;
+  sequence: number;
+  planned_cost_min_micros: number | null;
+  planned_cost_max_micros: number | null;
+  planned_cost_currency: string | null;
+  planned_time_min_minutes: number | null;
+  planned_time_max_minutes: number | null;
+  fit_status: string;
+  cost_basis: string | null;
+  rationale: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -85,7 +116,39 @@ const STRATEGY_LABELS: Record<string, string> = {
   cost_first: "Cost First",
   time_first: "Time First",
   balanced: "Balanced",
+  existing: "Existing",
+  cost_conscious: "Cost Conscious",
+  mixed: "Mixed",
+  subscription: "Subscription",
+  registry_expanded: "Registry Expanded",
 };
+
+const ROLE_LABELS: Record<string, string> = {
+  implementer: "Implementer",
+  reviewer: "Reviewer",
+  researcher: "Researcher",
+  designer: "Designer",
+  assistant: "Assistant",
+};
+
+/*
+ * fit_status is a capability-fit fact against the step's own
+ * requirements, not a verdict on the resource. The labels stay within
+ * that meaning.
+ */
+const FIT_STATUS_LABELS: Record<string, string> = {
+  meets: "Meets",
+  below_minimum: "Below minimum",
+  unknown: "Unknown",
+};
+
+function formatMicros(micros: number): string {
+  const value = micros / 1_000_000;
+
+  return Number.isInteger(value)
+    ? String(value)
+    : String(Number(value.toFixed(6)));
+}
 
 const cardStyle = {
   background: "#fff",
@@ -218,7 +281,7 @@ const readJson = (
     code?: string;
     plan?: ProjectPlanRow;
     project?: { name: string };
-    items?: ProjectTaskRow[];
+    items?: unknown[];
   } | null;
 }> =>
   response
@@ -247,11 +310,17 @@ export default function PlanDetailPage() {
     null
   );
   const [tasks, setTasks] = useState<ProjectTaskRow[]>([]);
+  const [assignments, setAssignments] = useState<
+    PlanResourceAssignmentRow[]
+  >([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [tasksError, setTasksError] = useState<string | null>(
     null
   );
+  const [assignmentsError, setAssignmentsError] = useState<
+    string | null
+  >(null);
   const [notFound, setNotFound] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
 
@@ -277,6 +346,37 @@ export default function PlanDetailPage() {
     null
   );
 
+  /*
+   * Which task panels are open, and which have been opened at least
+   * once. A panel is mounted only after its first opening, so a task
+   * never requests its AI options before the user asks to see them,
+   * and a second opening reuses what was already read.
+   *
+   * Nothing here is persisted and nothing here is a decision: opening
+   * a panel neither selects an option nor compares cost, time, fit or
+   * the plan strategy. The options component owns its own loading,
+   * error and selection state so choosing an option on one task
+   * never reloads the plan, the project or the task list.
+   */
+  const [expandedTaskIds, setExpandedTaskIds] = useState<
+    Record<string, boolean>
+  >({});
+  const [loadedTaskIds, setLoadedTaskIds] = useState<
+    Record<string, boolean>
+  >({});
+
+  function toggleTaskAiOptions(taskId: string) {
+    setExpandedTaskIds((current) => ({
+      ...current,
+      [taskId]: !current[taskId],
+    }));
+    setLoadedTaskIds((current) =>
+      current[taskId]
+        ? current
+        : { ...current, [taskId]: true }
+    );
+  }
+
   useEffect(() => {
     if (missingId) {
       return;
@@ -294,12 +394,16 @@ export default function PlanDetailPage() {
       fetch(`/api/planner/plans/${planId}/tasks`, {
         cache: "no-store",
       }).then(readJson),
+      fetch(`/api/planner/plans/${planId}/assignments`, {
+        cache: "no-store",
+      }).then(readJson),
     ])
       .then(
         ([
           planResult,
           projectResult,
           tasksResult,
+          assignmentsResult,
         ]) => {
           if (cancelled) {
             return;
@@ -345,7 +449,7 @@ export default function PlanDetailPage() {
           ) {
             setTasks(
               Array.isArray(tasksResult.data.items)
-                ? tasksResult.data.items
+                ? (tasksResult.data.items as ProjectTaskRow[])
                 : []
             );
           } else {
@@ -354,6 +458,25 @@ export default function PlanDetailPage() {
                 "string"
                 ? tasksResult.data.error
                 : "Could not load tasks"
+            );
+          }
+
+          if (
+            assignmentsResult.response.ok &&
+            assignmentsResult.data?.ok &&
+            Array.isArray(assignmentsResult.data.items)
+          ) {
+            setAssignments(
+              assignmentsResult.data.items as PlanResourceAssignmentRow[]
+            );
+            setAssignmentsError(null);
+          } else {
+            setAssignments([]);
+            setAssignmentsError(
+              typeof assignmentsResult.data?.error ===
+                "string"
+                ? assignmentsResult.data.error
+                : "Could not load assignments"
             );
           }
 
@@ -734,6 +857,15 @@ export default function PlanDetailPage() {
             <Field
               label="CREATED"
               value={formatDate(plan.created_at)}
+            />
+
+            <Field
+              label="PRICING BASIS"
+              value={
+                plan.pricing_basis_at
+                  ? formatDate(plan.pricing_basis_at)
+                  : "—"
+              }
             />
           </div>
 
@@ -1213,8 +1345,229 @@ export default function PlanDetailPage() {
                         {task.description}
                       </p>
                     ) : null}
+
+                    <div
+                      style={{
+                        marginTop: 10,
+                      }}
+                    >
+                      <button
+                        type="button"
+                        onClick={() =>
+                          toggleTaskAiOptions(task.id)
+                        }
+                        style={{
+                          padding: "6px 10px",
+                          borderRadius: 8,
+                          border: "1px solid #ddd",
+                          background: "#fff",
+                          fontSize: 13,
+                          fontWeight: 600,
+                        }}
+                      >
+                        {expandedTaskIds[task.id]
+                          ? "Hide AI options"
+                          : "Show AI options"}
+                      </button>
+                    </div>
+
+                    {loadedTaskIds[task.id] ? (
+                      <TaskAiOptions
+                        taskId={task.id}
+                        expanded={
+                          expandedTaskIds[task.id] ===
+                          true
+                        }
+                      />
+                    ) : null}
                   </div>
                 ))}
+              </div>
+            )}
+          </div>
+
+          <div style={cardStyle}>
+            <h2
+              style={{
+                fontSize: 16,
+                margin: "0 0 8px",
+              }}
+            >
+              Assignments
+            </h2>
+
+            <p
+              style={{
+                margin: "0 0 14px",
+                color: "#666",
+                fontSize: 14,
+                lineHeight: 1.5,
+              }}
+            >
+              The resource, role, cost and planned time stored for
+              each step of this plan. These are recorded facts;
+              nothing here is selected or recommended.
+            </p>
+
+            {assignmentsError ? (
+              <div>
+                <p
+                  style={{
+                    margin: "0 0 14px",
+                    color: "#b42318",
+                    fontSize: 14,
+                    lineHeight: 1.5,
+                  }}
+                >
+                  {assignmentsError}
+                </p>
+
+                <button
+                  type="button"
+                  onClick={() => setReloadKey((key) => key + 1)}
+                  style={{
+                    padding: "9px 14px",
+                    borderRadius: 8,
+                    border: "1px solid #ddd",
+                    background: "#fff",
+                    fontSize: 14,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  Retry
+                </button>
+              </div>
+            ) : assignments.length === 0 ? (
+              <p
+                style={{
+                  margin: 0,
+                  color: "#666",
+                  fontSize: 14,
+                  lineHeight: 1.5,
+                }}
+              >
+                No assignments recorded for this plan yet.
+              </p>
+            ) : (
+              <div
+                style={{
+                  display: "grid",
+                  gap: 14,
+                }}
+              >
+                {assignments.map((assignment) => {
+                  const resource =
+                    assignment.resource_source ===
+                    "registry"
+                      ? `Registry model ${assignment.registry_model_id}`
+                      : `Registered resource ${assignment.ai_resource_id}`;
+
+                  const cost =
+                    assignment.planned_cost_min_micros !==
+                      null &&
+                    assignment.planned_cost_max_micros !==
+                      null &&
+                    assignment.planned_cost_currency !==
+                      null
+                      ? `${formatMicros(assignment.planned_cost_min_micros)} – ${formatMicros(assignment.planned_cost_max_micros)} ${assignment.planned_cost_currency}`
+                      : "Unknown";
+
+                  const time =
+                    assignment.planned_time_min_minutes !==
+                      null &&
+                    assignment.planned_time_max_minutes !==
+                      null
+                      ? `${assignment.planned_time_min_minutes}–${assignment.planned_time_max_minutes} min`
+                      : "Unknown";
+
+                  return (
+                    <div
+                      key={assignment.id}
+                      style={{
+                        paddingTop: 10,
+                        borderTop: "1px solid #f0f1f4",
+                        display: "grid",
+                        gap: 6,
+                        fontSize: 14,
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent:
+                            "space-between",
+                          alignItems: "center",
+                          gap: 12,
+                        }}
+                      >
+                        <span
+                          style={{
+                            fontWeight: 600,
+                          }}
+                        >
+                          {assignment.sequence}.{" "}
+                          {ROLE_LABELS[assignment.role] ??
+                            assignment.role}
+                        </span>
+
+                        <Badge
+                          text={
+                            FIT_STATUS_LABELS[
+                              assignment.fit_status
+                            ] ?? assignment.fit_status
+                          }
+                          color="#555"
+                        />
+                      </div>
+
+                      <div
+                        style={{
+                          color: "#333",
+                        }}
+                      >
+                        Resource:{" "}
+                        <code
+                          style={{
+                            wordBreak: "break-all",
+                          }}
+                        >
+                          {resource}
+                        </code>
+                      </div>
+
+                      <div
+                        style={{
+                          display: "grid",
+                          gap: 2,
+                          color: "#666",
+                          fontSize: 13,
+                        }}
+                      >
+                        <span>
+                          Cost: {cost}
+                        </span>
+                        <span>
+                          Time: {time}
+                        </span>
+                      </div>
+
+                      {assignment.cost_basis ? (
+                        <p
+                          style={{
+                            margin: 0,
+                            color: "#666",
+                            fontSize: 12,
+                            lineHeight: 1.5,
+                          }}
+                        >
+                          Basis:{" "}
+                          {assignment.cost_basis}
+                        </p>
+                      ) : null}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>

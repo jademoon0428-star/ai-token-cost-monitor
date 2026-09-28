@@ -11,8 +11,10 @@ import {
   getProjectTask,
   getProjectTaskAiOption,
   linkProjectTaskToExecutionTask as linkInDb,
+  listProjectTaskAiOptions,
   nextProjectPlanVersion,
   nextProjectTaskSequence,
+  replaceProjectTaskAiOptions,
   selectProjectTaskAiOption as selectInDb,
   updateProject as updateProjectInDb,
   updateProjectStatus as updateProjectStatusInDb,
@@ -29,6 +31,11 @@ import type {
   ProjectTaskRow,
   ProjectTaskStatus,
 } from "@/lib/repositories/planner-repository";
+import {
+  listAiRegistry,
+  resolveRegistryPricing,
+} from "@/lib/registry/ai-registry-repository";
+import { generatePlannerCandidates } from "@/lib/planner/candidate-generator";
 
 /*
  * v1.4-C AI Project Planner service.
@@ -984,17 +991,19 @@ export function linkProjectTaskToExecutionTask(
 }
 
 /*
- * Records one candidate way of running a planned step.
+ * Validates one candidate's measurements and returns them in storage
+ * shape.
  *
- * There is no isSelected input here on purpose. A new option always
- * starts unselected, and the only way to select one is
- * selectProjectTaskAiOption, which is an explicit user decision. A
- * caller that passes isSelected anyway has it ignored.
+ * Shared by the manual create path and the R2 3.3-C2 generation path
+ * so both inherit the same guarantees: a cost is either fully known
+ * or fully null, a range never inverts, an empty string is never
+ * stored, and a model or tool that does not exist is refused rather
+ * than written.
  */
-export function createProjectTaskAiOption(input: {
-  projectTaskId: string;
+function normalizeAiOptionFields(input: {
   modelId: string;
   toolId?: string | null;
+  isSelected?: 0 | 1;
   costMinMicros?: number | null;
   costMaxMicros?: number | null;
   costCurrency?: string | null;
@@ -1004,9 +1013,20 @@ export function createProjectTaskAiOption(input: {
   excludedReason?: string | null;
   pricingBasis?: string | null;
   rationale?: string | null;
-}): ProjectTaskAiOptionRow {
-  requireProjectTask(input.projectTaskId);
-
+}): {
+  modelId: string;
+  toolId: string | null;
+  isSelected: 0 | 1;
+  costMinMicros: number | null;
+  costMaxMicros: number | null;
+  costCurrency: string | null;
+  timeMinMinutes: number | null;
+  timeMaxMinutes: number | null;
+  fitStatus: FitStatus;
+  excludedReason: string | null;
+  pricingBasis: string | null;
+  rationale: string | null;
+} {
   const costMin = optionalNonNegative(
     input.costMinMicros,
     "cost_min_micros"
@@ -1048,14 +1068,10 @@ export function createProjectTaskAiOption(input: {
     "time"
   );
 
-  const id = randomUUID();
-
-  createProjectTaskAiOptionInDb({
-    id,
-    projectTaskId: input.projectTaskId,
+  return {
     modelId: assertModelExists(input.modelId),
     toolId: assertToolExists(input.toolId),
-    isSelected: 0,
+    isSelected: input.isSelected ?? 0,
     costMinMicros: costMin,
     costMaxMicros: costMax,
     costCurrency,
@@ -1082,10 +1098,175 @@ export function createProjectTaskAiOption(input: {
       input.rationale,
       "rationale"
     ),
+  };
+}
+
+/*
+ * Records one candidate way of running a planned step.
+ *
+ * There is no isSelected input here on purpose. A new option always
+ * starts unselected, and the only way to select one is
+ * selectProjectTaskAiOption, which is an explicit user decision. A
+ * caller that passes isSelected anyway has it ignored.
+ */
+export function createProjectTaskAiOption(input: {
+  projectTaskId: string;
+  modelId: string;
+  toolId?: string | null;
+  costMinMicros?: number | null;
+  costMaxMicros?: number | null;
+  costCurrency?: string | null;
+  timeMinMinutes?: number | null;
+  timeMaxMinutes?: number | null;
+  fitStatus?: FitStatus;
+  excludedReason?: string | null;
+  pricingBasis?: string | null;
+  rationale?: string | null;
+}): ProjectTaskAiOptionRow {
+  requireProjectTask(input.projectTaskId);
+
+  const fields = normalizeAiOptionFields(input);
+  const id = randomUUID();
+
+  createProjectTaskAiOptionInDb({
+    id,
+    projectTaskId: input.projectTaskId,
     createdAt: new Date().toISOString(),
+    ...fields,
   });
 
   return requireOption(id);
+}
+
+/*
+ * R2 Phase 3.3-C2: records the candidate set for one planned step.
+ *
+ * This is a persistence step, not an estimation step. Every number
+ * written here is produced upstream by the R2 3.3-C1 candidate
+ * generator and its estimators, and this function re-derives nothing:
+ * no cost, no duration, no capability judgement, no ordering. If the
+ * generator is wrong, the fix belongs there, not here.
+ *
+ * The plan is read, not the caller's word. strategy and created_at
+ * come from project_plans, and the models come from the AI Registry,
+ * so a caller cannot pass in a different strategy, a different
+ * pricing instant or a hand-picked model list.
+ *
+ * plan.created_at is the frozen pricing basis for every candidate in
+ * this batch. The current time is never used to price anything, which
+ * is why re-running generation later against an unchanged plan
+ * reproduces the same figures rather than today's card.
+ *
+ * The write is a replace, not an append, and it is atomic. See
+ * replaceProjectTaskAiOptions.
+ *
+ * What this deliberately does not do:
+ *
+ * - It selects nothing. Every row is written with is_selected = 0,
+ *   including a candidate the strategy marked as representative. A
+ *   strategy representative is a presentation hint about where the
+ *   cost and time trade-offs sit; a selection is a decision the user
+ *   makes through the select endpoint. Conflating them would let the
+ *   Planner pick for the user, which is exactly what this feature is
+ *   built not to do.
+ * - It does not restore a previous selection. Regenerating a step
+ *   leaves it unselected.
+ * - It does not write excluded_reason, because nothing in Phase 3.3
+ *   produces one.
+ * - It never touches usage_records, cost_records, task_sessions or
+ *   task_usage_records. A planned estimate is not a measurement.
+ */
+export function generateProjectTaskAiOptions(
+  projectTaskId: string
+): ProjectTaskAiOptionRow[] {
+  const projectTask = requireProjectTask(projectTaskId);
+  const plan = requirePlan(projectTask.plan_id);
+
+  const strategy = assertOneOf(
+    plan.strategy,
+    PROJECT_PREFERENCES,
+    "INVALID_STRATEGY",
+    "strategy"
+  );
+
+  /*
+   * The registry is the only source of candidate models. A model that
+   * is registered but unpriced still becomes a candidate, with a null
+   * cost, because "we do not know the price" is a fact worth showing
+   * and not a reason to hide the model.
+   */
+  const models = listAiRegistry().flatMap(
+    (provider) => provider.models
+  );
+
+  const generated = generatePlannerCandidates({
+    task: {
+      category: projectTask.category,
+      complexity: projectTask.complexity,
+      required_capabilities:
+        projectTask.required_capabilities,
+      estimated_input_tokens_min:
+        projectTask.estimated_input_tokens_min,
+      estimated_input_tokens_max:
+        projectTask.estimated_input_tokens_max,
+      estimated_output_tokens_min:
+        projectTask.estimated_output_tokens_min,
+      estimated_output_tokens_max:
+        projectTask.estimated_output_tokens_max,
+    },
+    planCreatedAt: plan.created_at,
+    strategy,
+    models,
+    /*
+     * Injected rather than reimplemented. The repository's resolver
+     * is the single authority on which rate applies at an instant;
+     * this function must never re-derive one.
+     */
+    pricingResolver: (modelId, at) =>
+      resolveRegistryPricing(modelId, at),
+  });
+
+  const createdAt = new Date().toISOString();
+
+  const options = generated.candidates.map(
+    (candidate) => ({
+      id: randomUUID(),
+      projectTaskId,
+      createdAt,
+      ...normalizeAiOptionFields({
+        modelId: candidate.modelId,
+        toolId: candidate.toolId,
+        /*
+         * Always unselected. Not the representative, not the fit
+         * status, not the strategy. Only the user selects.
+         */
+        isSelected: 0,
+        costMinMicros: candidate.costMinMicros,
+        costMaxMicros: candidate.costMaxMicros,
+        costCurrency: candidate.costCurrency,
+        timeMinMinutes: candidate.timeMinMinutes,
+        timeMaxMinutes: candidate.timeMaxMinutes,
+        fitStatus: candidate.fitStatus,
+        excludedReason: null,
+        pricingBasis: candidate.pricingBasis,
+        rationale: candidate.rationale,
+      }),
+    })
+  );
+
+  replaceProjectTaskAiOptions(
+    projectTaskId,
+    options
+  );
+
+  /*
+   * Read back in the table's own order
+   * (created_at, then id). That order is a storage detail and does
+   * not reproduce the generator's strategy order, because every row
+   * in a batch shares one timestamp and the tie-break is the option
+   * id. Callers must treat the result as an unordered set.
+   */
+  return listProjectTaskAiOptions(projectTaskId);
 }
 
 /*

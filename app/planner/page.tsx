@@ -227,21 +227,46 @@ export default function PlannerPage() {
           </p>
         </div>
 
-        <Link
-          href="/planner/new"
+        <div
           style={{
-            padding: "9px 14px",
-            borderRadius: 8,
-            background: "#172033",
-            color: "#fff",
-            textDecoration: "none",
-            fontSize: 14,
-            fontWeight: 700,
-            whiteSpace: "nowrap",
+            display: "flex",
+            gap: 10,
+            flexShrink: 0,
           }}
         >
-          New Project
-        </Link>
+          <Link
+            href="/planner/resources"
+            style={{
+              padding: "9px 14px",
+              borderRadius: 8,
+              border: "1px solid #ddd",
+              background: "#fff",
+              color: "#172033",
+              textDecoration: "none",
+              fontSize: 14,
+              fontWeight: 700,
+              whiteSpace: "nowrap",
+            }}
+          >
+            AI Resources
+          </Link>
+
+          <Link
+            href="/planner/new"
+            style={{
+              padding: "9px 14px",
+              borderRadius: 8,
+              background: "#172033",
+              color: "#fff",
+              textDecoration: "none",
+              fontSize: 14,
+              fontWeight: 700,
+              whiteSpace: "nowrap",
+            }}
+          >
+            New Project
+          </Link>
+        </div>
       </header>
 
       {loading ? (

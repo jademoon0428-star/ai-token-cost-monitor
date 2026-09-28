@@ -31,6 +31,7 @@ type ProjectPlanRow = {
   version: number;
   strategy: string;
   summary: string | null;
+  pricing_basis_at: string | null;
   created_at: string;
 };
 
@@ -50,6 +51,41 @@ const PREFERENCE_LABELS: Record<string, string> = {
   time_first: "Time First",
   balanced: "Balanced",
 };
+
+/*
+ * The five combination strategies come from the R2 3.3-A rules and are
+ * neutral names, not judgements. A plan's strategy is either one of the
+ * three manual preferences above or one of these five; there is no
+ * overlap, so the value alone tells manual and combination plans apart.
+ */
+const COMBINATION_STRATEGIES = [
+  "existing",
+  "cost_conscious",
+  "mixed",
+  "subscription",
+  "registry_expanded",
+] as const;
+
+const COMBINATION_STRATEGY_LABELS: Record<string, string> = {
+  existing: "Existing",
+  cost_conscious: "Cost Conscious",
+  mixed: "Mixed",
+  subscription: "Subscription",
+  registry_expanded: "Registry Expanded",
+};
+
+const PLAN_STRATEGY_LABELS: Record<string, string> = {
+  ...PREFERENCE_LABELS,
+  ...COMBINATION_STRATEGY_LABELS,
+};
+
+function isCombinationPlan(plan: {
+  strategy: string;
+}): boolean {
+  return COMBINATION_STRATEGIES.includes(
+    plan.strategy as (typeof COMBINATION_STRATEGIES)[number]
+  );
+}
 
 const STATUS_LABELS: Record<string, string> = {
   planning: "Planning",
@@ -195,6 +231,12 @@ export default function ProjectDetailPage() {
     null
   );
 
+  const [generatingCombinations, setGeneratingCombinations] =
+    useState(false);
+  const [combinationError, setCombinationError] = useState<
+    string | null
+  >(null);
+
   const strategy =
     strategyChoice ??
     (STRATEGIES.includes(
@@ -202,6 +244,13 @@ export default function ProjectDetailPage() {
     )
       ? project?.preference
       : "balanced");
+
+  const manualPlans = plans.filter(
+    (plan) => !isCombinationPlan(plan)
+  );
+  const combinationPlans = plans.filter(
+    (plan) => isCombinationPlan(plan)
+  );
 
   useEffect(() => {
     if (missingId) {
@@ -348,6 +397,101 @@ export default function ProjectDetailPage() {
           : "Failed to create plan"
       );
       setCreatingPlan(false);
+    }
+  }
+
+  function planVersionRow(plan: ProjectPlanRow) {
+    return (
+      <div
+        key={plan.id}
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: 12,
+          paddingTop: 8,
+          borderTop: "1px solid #f0f1f4",
+          fontSize: 14,
+        }}
+      >
+        <Link
+          href={`/planner/${projectId}/plans/${plan.id}`}
+          style={{
+            color: "#111",
+            fontWeight: 600,
+            textDecoration: "none",
+          }}
+        >
+          v{plan.version}
+        </Link>
+
+        <span
+          style={{
+            color: "#666",
+            fontSize: 13,
+            textAlign: "right",
+          }}
+        >
+          {PLAN_STRATEGY_LABELS[plan.strategy] ??
+            plan.strategy}{" "}
+          · {formatDate(plan.created_at)}
+          {plan.pricing_basis_at
+            ? ` · basis ${formatDate(
+                plan.pricing_basis_at
+              )}`
+            : ""}
+        </span>
+      </div>
+    );
+  }
+
+  /*
+   * Generates the combination plans of the project. There is no body
+   * and no client input: the pricing instant, the versions and the
+   * strategies are all decided server-side. On success the plan list is
+   * reloaded so the new versions appear in their own group.
+   */
+  async function handleGenerateCombinations() {
+    if (generatingCombinations) {
+      return;
+    }
+
+    setGeneratingCombinations(true);
+    setCombinationError(null);
+
+    try {
+      const response = await fetch(
+        `/api/planner/projects/${projectId}/combinations`,
+        {
+          method: "POST",
+        }
+      );
+
+      const data = await response
+        .json()
+        .catch(() => null);
+
+      if (
+        !response.ok ||
+        !data?.ok ||
+        !data?.generation
+      ) {
+        throw new Error(
+          typeof data?.error === "string"
+            ? data.error
+            : `Failed to generate combination plans (${response.status})`
+        );
+      }
+
+      setReloadKey((key) => key + 1);
+    } catch (cause) {
+      setCombinationError(
+        cause instanceof Error
+          ? cause.message
+          : "Failed to generate combination plans"
+      );
+    } finally {
+      setGeneratingCombinations(false);
     }
   }
 
@@ -647,6 +791,74 @@ export default function ProjectDetailPage() {
             <h2
               style={{
                 fontSize: 16,
+                margin: "0 0 8px",
+              }}
+            >
+              Combination plans
+            </h2>
+
+            <p
+              style={{
+                margin: "0 0 14px",
+                color: "#666",
+                fontSize: 14,
+                lineHeight: 1.5,
+              }}
+            >
+              Generates one plan per combination strategy from the
+              project&apos;s latest plan that owns tasks, priced at one
+              shared instant. Every plan is presented as facts; nothing
+              is selected or recommended.
+            </p>
+
+            {combinationError ? (
+              <p
+                role="alert"
+                style={{
+                  margin: "0 0 14px",
+                  color: "#b42318",
+                  fontSize: 14,
+                  lineHeight: 1.5,
+                }}
+              >
+                {combinationError}
+              </p>
+            ) : null}
+
+            <button
+              type="button"
+              onClick={() =>
+                void handleGenerateCombinations()
+              }
+              disabled={generatingCombinations}
+              style={{
+                padding: "10px 16px",
+                borderRadius: 8,
+                border: 0,
+                background: "#172033",
+                color: "#fff",
+                fontSize: 14,
+                fontWeight: 700,
+                cursor: generatingCombinations
+                  ? "default"
+                  : "pointer",
+                opacity: generatingCombinations
+                  ? 0.6
+                  : 1,
+              }}
+            >
+              {generatingCombinations
+                ? "Generating…"
+                : combinationError
+                  ? "Retry"
+                  : "Generate combination plans"}
+            </button>
+          </div>
+
+          <div style={cardStyle}>
+            <h2
+              style={{
+                fontSize: 16,
                 margin: "0 0 12px",
               }}
             >
@@ -695,48 +907,67 @@ export default function ProjectDetailPage() {
               <div
                 style={{
                   display: "grid",
-                  gap: 8,
+                  gap: 18,
                 }}
               >
-                {plans.map((plan) => (
-                  <div
-                    key={plan.id}
-                    style={{
-                      display: "flex",
-                      justifyContent:
-                        "space-between",
-                      alignItems: "center",
-                      gap: 12,
-                      paddingTop: 8,
-                      borderTop: "1px solid #f0f1f4",
-                      fontSize: 14,
-                    }}
-                  >
-                    <Link
-                      href={`/planner/${projectId}/plans/${plan.id}`}
+                {manualPlans.length > 0 ? (
+                  <div>
+                    <h3
                       style={{
-                        color: "#111",
-                        fontWeight: 600,
-                        textDecoration: "none",
+                        fontSize: 14,
+                        fontWeight: 700,
+                        margin: "0 0 8px",
                       }}
                     >
-                      v{plan.version}
-                    </Link>
+                      Manual plans
+                    </h3>
 
-                    <span
+                    <div
                       style={{
+                        display: "grid",
+                        gap: 8,
+                      }}
+                    >
+                      {manualPlans.map(planVersionRow)}
+                    </div>
+                  </div>
+                ) : null}
+
+                {combinationPlans.length > 0 ? (
+                  <div>
+                    <h3
+                      style={{
+                        fontSize: 14,
+                        fontWeight: 700,
+                        margin: "0 0 8px",
+                      }}
+                    >
+                      Combination plans
+                    </h3>
+
+                    <p
+                      style={{
+                        margin: "0 0 8px",
                         color: "#666",
                         fontSize: 13,
+                        lineHeight: 1.5,
                       }}
                     >
-                      {PREFERENCE_LABELS[
-                        plan.strategy
-                      ] ?? plan.strategy}{" "}
-                      ·{" "}
-                      {formatDate(plan.created_at)}
-                    </span>
+                      Generated viewpoints, priced at one shared
+                      instant. Nothing here is selected or
+                      recommended.
+                    </p>
+
+                    <div
+                      style={{
+                        display: "grid",
+                        gap: 8,
+                      }}
+                    >
+                      {combinationPlans.map(planVersionRow)}
+                    </div>
                   </div>
-                ))}
+                ) : null}
               </div>
             )}
           </div>
