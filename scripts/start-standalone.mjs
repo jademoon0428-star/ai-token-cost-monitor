@@ -1,17 +1,47 @@
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { cpSync, existsSync } from "node:fs";
 import { createServer } from "node:net";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const serverEntry = join(root, ".next", "standalone", "server.js");
+const standaloneDir = join(root, ".next", "standalone");
+const serverEntry = join(standaloneDir, "server.js");
+
+const staticSrc = join(root, ".next", "static");
+const staticDst = join(standaloneDir, ".next", "static");
+const publicSrc = join(root, "public");
+const publicDst = join(standaloneDir, "public");
 
 if (!existsSync(serverEntry)) {
   throw new Error(
     "standalone build not found at .next/standalone/server.js - run `npm run build` first"
   );
 }
+
+// Next.js `output: "standalone"` does not copy client assets. Without them the
+// server returns 404 for every /_next/static request, the page never hydrates,
+// and client components stay on their loading placeholder forever.
+function ensureStandaloneAsset(source, target, label, required) {
+  if (!existsSync(source)) {
+    if (required) {
+      throw new Error(
+        `standalone ${label} not found at ${source} - run \`npm run build\` first`
+      );
+    }
+    return;
+  }
+  if (existsSync(target)) {
+    return;
+  }
+  cpSync(source, target, { recursive: true });
+  console.log(
+    `[ai-token-cost-monitor] standalone ${label} copied -> ${target}`
+  );
+}
+
+ensureStandaloneAsset(staticSrc, staticDst, "static assets", true);
+ensureStandaloneAsset(publicSrc, publicDst, "public assets", false);
 
 const hostname = process.env.HOSTNAME || "127.0.0.1";
 process.env.HOSTNAME = hostname;
