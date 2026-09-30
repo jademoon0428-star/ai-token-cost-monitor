@@ -281,6 +281,10 @@ export default function TaskAiOptions({
   const [selectError, setSelectError] = useState<
     string | null
   >(null);
+  const [generating, setGenerating] = useState(false);
+  const [generateError, setGenerateError] = useState<
+    string | null
+  >(null);
   const [reloadKey, setReloadKey] = useState(0);
 
   /*
@@ -314,6 +318,7 @@ export default function TaskAiOptions({
         setOptions(items);
         setError(null);
         setSelectingId(null);
+        setGenerating(false);
       })
       .catch((cause) => {
         if (cancelled) {
@@ -326,6 +331,7 @@ export default function TaskAiOptions({
             : "Failed to load AI options."
         );
         setSelectingId(null);
+        setGenerating(false);
       });
 
     return () => {
@@ -382,6 +388,59 @@ export default function TaskAiOptions({
           : "Failed to select AI option."
       );
       setSelectingId(null);
+    }
+  }
+
+  /*
+   * Replaces this planned step's candidate set with the generated
+   * batch. There is no body: the service decides from the task, the
+   * plan's frozen basis, the registry and the user's active
+   * resources. On success the list is read again rather than patched,
+   * because the response carries the whole set and only the server
+   * knows the storage order.
+   *
+   * Nothing here chooses on the user's behalf. Regeneration resets
+   * every row to is_selected = 0, so selection stays a separate,
+   * explicit user action made through the select flow.
+   */
+  async function handleGenerate() {
+    if (generating) {
+      return;
+    }
+
+    setGenerating(true);
+    setGenerateError(null);
+
+    try {
+      const response = await fetch(
+        `/api/planner/tasks/${taskId}/ai-options/generate`,
+        { method: "POST" }
+      );
+
+      const data = await response
+        .json()
+        .catch(() => null);
+
+      if (
+        !response.ok ||
+        !data ||
+        data.ok !== true
+      ) {
+        throw new Error(
+          typeof data?.error === "string"
+            ? data.error
+            : "Failed to generate AI options."
+        );
+      }
+
+      setReloadKey((key) => key + 1);
+    } catch (cause) {
+      setGenerateError(
+        cause instanceof Error
+          ? cause.message
+          : "Failed to generate AI options."
+      );
+      setGenerating(false);
     }
   }
 
@@ -460,10 +519,39 @@ export default function TaskAiOptions({
           ) : null}
 
           {options.length === 0 ? (
-            <p style={MUTED_TEXT_STYLE}>
-              No AI options recorded for this
-              task.
-            </p>
+            <>
+              <p style={MUTED_TEXT_STYLE}>
+                No AI options recorded for this
+                task.
+              </p>
+
+              {generateError ? (
+                <p
+                  role="alert"
+                  style={ERROR_TEXT_STYLE}
+                >
+                  {generateError}
+                </p>
+              ) : null}
+
+              <button
+                type="button"
+                disabled={generating}
+                onClick={handleGenerate}
+                style={{
+                  ...SECONDARY_BUTTON_STYLE,
+                  marginTop: 10,
+                  cursor: generating
+                    ? "default"
+                    : "pointer",
+                  opacity: generating ? 0.6 : 1,
+                }}
+              >
+                {generating
+                  ? "Generating…"
+                  : "Generate AI Options"}
+              </button>
+            </>
           ) : (
             <div
               style={{
