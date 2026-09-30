@@ -10,7 +10,7 @@ import {
 } from "@/lib/services/cost-service";
 
 import {
-  isOfficialVerifiedRecord as isOfficialVerifiedSourceRecord,
+  isSourceReportedOfficialCost,
 } from "@/lib/cost-policy";
 
 /*
@@ -119,9 +119,10 @@ function isVerifiedRecord(
   record: UnifiedRecord
 ): boolean {
   if (
-    !isOfficialVerifiedSourceRecord(
+    !isSourceReportedOfficialCost(
       record.source,
-      record.accuracy
+      record.accuracy,
+      record.provenance
     )
   ) {
     return false;

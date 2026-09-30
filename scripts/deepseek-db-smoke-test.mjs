@@ -45,7 +45,7 @@ const row = db.prepare(`
   WHERE u.id = ?
 `).get(fixture.id);
 
-if (!row) throw new Error("DeepSeek fixture was not stored in SQLite. POST the fixture to /api/providers/deepseek first.");
+if (!row) throw new Error("DeepSeek fixture was not stored in SQLite.");
 if (Number(row.total_cost_micros) !== expectedMicros) throw new Error(`cost mismatch: expected ${expectedMicros}, got ${row.total_cost_micros}`);
 if (row.accuracy !== "verified" || row.source !== "official_api") throw new Error("accuracy/source mismatch");
 console.log("DeepSeek → SQLite → Cost Engine smoke test: PASS");

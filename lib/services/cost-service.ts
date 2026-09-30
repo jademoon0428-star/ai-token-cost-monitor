@@ -15,7 +15,7 @@ import {
 } from "@/lib/parsers/codex";
 
 import {
-  isOfficialVerifiedRecord as isOfficialVerifiedSourceRecord,
+  isSourceReportedOfficialCost,
 } from "@/lib/cost-policy";
 
 export type Period =
@@ -438,12 +438,12 @@ function isOfficialVerifiedRecord(
   record: UnifiedRecord
 ): boolean {
   return (
-    isOfficialVerifiedSourceRecord(
+    isSourceReportedOfficialCost(
       record.source,
-      record.accuracy
+      record.accuracy,
+      record.provenance
     ) &&
-    record.cost.amount !== null &&
-    record.accuracy === "exact"
+    record.cost.amount !== null
   );
 }
 

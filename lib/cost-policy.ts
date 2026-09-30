@@ -25,3 +25,14 @@ export function isOfficialVerifiedRecord(
     isVerifiedAccuracy(accuracy)
   );
 }
+
+export function isSourceReportedOfficialCost(
+  source: string | null | undefined,
+  accuracy: string | null | undefined,
+  provenance: string | null | undefined
+): boolean {
+  return (
+    isOfficialVerifiedRecord(source, accuracy) &&
+    provenance === "source_reported"
+  );
+}

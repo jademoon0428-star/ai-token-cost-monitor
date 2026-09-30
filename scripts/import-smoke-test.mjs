@@ -6,9 +6,5 @@ const usage = [{
 }];
 const pricing = { "OpenAI:gpt-test": { inputPerMillion: 1, outputPerMillion: 2, version: "smoke-v1", currency: "USD" } };
 const res = await fetch(`${base}/api/import`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ usage, pricing }) });
-if (!res.ok) throw new Error(`import failed: ${res.status}`);
-console.log(JSON.stringify(await res.json(), null, 2));
-const costs = await fetch(`${base}/api/costs`).then(r => r.json());
-const hit = costs.costs.find(x => x.model === "gpt-test");
-if (!hit || Number(hit.total_cost_micros) !== 1100000) throw new Error("cost verification failed");
-console.log("Import + Cost Engine smoke test: PASS");
+if (res.status !== 410) throw new Error(`generic import endpoint must stay closed (expected 410, got ${res.status})`);
+console.log("Generic /api/import endpoint closed: PASS");

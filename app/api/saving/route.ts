@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 
-import { isOfficialSource } from "@/lib/cost-policy";
+import {
+  isSourceReportedOfficialCost,
+} from "@/lib/cost-policy";
 
 import {
   getUnifiedCostData,
@@ -210,8 +212,10 @@ export async function GET(
     const verifiedRecords =
       records.filter(
         (record) =>
-          isOfficialSource(
-            record.source
+          isSourceReportedOfficialCost(
+            record.source,
+            record.accuracy,
+            record.provenance
           ) &&
           record.accuracy ===
             "exact" &&
