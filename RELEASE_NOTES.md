@@ -147,3 +147,32 @@ Release Preparation
 - Added a direct Dashboard return entry to /usage/import.
 - Existing parent return entries are preserved.
 - No changes to the Dashboard, Task Session, API, database, or installer.
+
+---
+
+# AI Cost Management v1.5.1
+
+## Release Status
+Final Release Freeze
+
+## Version
+1.5.1
+
+## Date
+2026-09-30
+
+## Changes in v1.5.1
+- AI Registry v1: providers, models, capabilities, and official rate cards, seeded from vendor documentation.
+- AI Project Planner: projects, immutable plan versions, planned steps with token buckets, and per-step candidate AI options. Options are facts, never recommendations; selection is a separate, explicit user action.
+- Planner resources and combination plans: ownership facts (access method, channel, entitlement, pricing basis) and whole-project combination plans across five strategies.
+- Planner AI option generation connected to the plan UI, available for the preference plans (Cost First, Time First, Balanced).
+- The task PATCH contract no longer accepts `taskId`; held-back fields are rejected instead of silently ignored.
+- Production standalone fix: client static assets are copied into the standalone output on startup (fixes `/ _next/static` 404s).
+- No changes to the Dashboard, Budget, AI Activity, or database behavior.
+- v1.5.0 was an interim version bump and was never packaged; its content is included in v1.5.1.
+
+## Installer
+AI-Cost-Management-Setup.exe
+
+## Package
+AI-Cost-Management-Payload.cab

@@ -1,6 +1,6 @@
 # Project Status
 
-Snapshot of the repository at commit `aedf89a` (2026-09-29). Documentation only — no code was changed to produce this file.
+Snapshot of the repository at commit `2f28633` (2026-09-30). Documentation only — no code was changed to produce this file.
 
 ## Stage
 
@@ -17,13 +17,11 @@ Operating principles, in priority order:
 
 | Field | Value |
 | --- | --- |
-| `package.json` version | `1.4.1` |
-| Last released | v1.4.1 (`278202f`, 2026-09-27) |
-| Branch | `master`, 8 commits ahead of `origin/master` |
-| Unreleased work | AI Registry v1 + AI Project Planner (7 commits after the v1.4.1 tag) |
-| Next release | Not yet named |
+| `package.json` version | `1.5.1` |
+| Last released | v1.5.1 (`2f28633`, 2026-09-30) |
+| Branch | `master` |
 
-The 8 local commits are **not** part of v1.4.1. v1.4.1 is frozen; the Registry and Planner work is additive and will ship in the next version.
+v1.5.1 is the current release and ships the AI Registry and AI Project Planner work described below. v1.4.1 remains frozen and is superseded.
 
 ## What is released and stable
 
@@ -35,10 +33,11 @@ The 8 local commits are **not** part of v1.4.1. v1.4.1 is frozen; the Registry a
 | v1.3.0 | Dashboard verified-record semantics corrected; cost-concentration and efficiency evidence added to Saving. |
 | v1.4.0 | v1.4-A/B: tasks, task sessions, usage-to-session attribution, `/api/tasks`, Dashboard Task Session UI. |
 | v1.4.1 | Core module navigation. No database, API, Dashboard, or installer change. |
+| v1.5.1 | AI Registry v1, AI Project Planner, Planner resources and combination plans, Planner AI-option generation UI, and the production standalone static-assets fix. |
 
-## What is in progress (unreleased)
+## What shipped in v1.5.1
 
-Three layers are landed on `master` and not yet released.
+Three additive layers shipped in v1.5.1 (released 2026-09-30).
 
 **AI Registry v1** — a vendor-facts layer. Providers, models, capabilities, and official rate cards, seeded from vendor documentation with a `source_url` and `source_checked_at`. It never rates, ranks, or scores a model, and it never records a capability as unsupported unless the vendor documents that. Seeded with 4 providers and 10 models. `npm run seed:registry` is a manual step; the app never seeds at runtime.
 
@@ -101,7 +100,7 @@ Additional validation and maintenance scripts (`validate-*.mjs`, `test-local-par
 
 ## Definition of done for the next release
 
-- The Registry and Planner work is released as a version after v1.4.1, with release notes that match `docs/CHANGELOG.md`.
+- The Registry and Planner work shipped in v1.5.1 (2026-09-30), with release notes that match `docs/CHANGELOG.md`.
 - Every new table and endpoint still satisfies the evidence rule: a fact column is nullable and means unknown, never zero.
 - No rate, score, rank, weight, or confidence column is introduced into the Registry or Planner.
 - No currency conversion is introduced.

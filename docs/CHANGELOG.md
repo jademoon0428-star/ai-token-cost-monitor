@@ -4,9 +4,9 @@ All notable changes to AI Cost Management, newest first.
 
 Derived from the git history. Released versions are frozen; the `[Unreleased]` section is additive and does not modify them.
 
-## [Unreleased]
+## [1.5.1] — 2026-09-30
 
-Post-v1.4.1 work on `master`. Not versioned, not packaged, not released.
+AI Registry v1, AI Project Planner, Planner resources and combination plans, plus the Planner AI-option generation UI, the task PATCH contract fix, and the production standalone static-assets fix. v1.5.0 was an interim version bump on `master`; it was never packaged and its content shipped as part of v1.5.1.
 
 ### Added — AI Registry v1
 
@@ -26,6 +26,13 @@ Post-v1.4.1 work on `master`. Not versioned, not packaged, not released.
 - Generation returns facts, not recommendations. It never filters, never scores, never selects.
 - Selection is a separate, explicit user action. `is_selected` is not in the create whitelist, and a client cannot pass `now`, a version, or an assignment to steer a result.
 - `lib/planner-api-errors.ts` as the shared API contract: `{ ok: true }` / `{ error, code }`, 404/409/400/500 mapping, and field whitelisting that keeps `id`, `status`, `version`, `sequence`, and `is_selected` out of client hands.
+- AI option generation is connected to the plan UI (`POST /api/planner/tasks/[id]/ai-options/generate` plus the per-step panel). The Generate action is offered only for the three preference plans; combination-strategy plans show a hint instead.
+- A planned step's generate endpoint performs an atomic replace of its candidate set and resets every row to `is_selected = 0`; selection always stays a separate explicit step.
+
+### Fixed
+
+- The task PATCH endpoint no longer accepts `taskId`: the execution-task link remains the separate `linkProjectTaskToExecutionTask` command, and a client that sends `taskId` now receives `400 UNKNOWN_FIELD` instead of a silent no-op.
+- Production standalone fix: client static assets are copied into the standalone output on startup, so `/ _next/static` requests no longer 404 and the Planner pages load on the release server.
 
 ### Added — Planner resources and combination plans
 
@@ -47,7 +54,7 @@ Post-v1.4.1 work on `master`. Not versioned, not packaged, not released.
 
 - v1.4.1 remains frozen. None of the above modifies the Dashboard, Task Session, the core modules, or the installer.
 - No change to `lib/cost-engine.ts`, `lib/cost-policy.ts`, or the Money Layer evidence rules.
-- No new dependency. The Registry and Planner add none.
+- The Registry and Planner layers add no new dependency. The only dependency added across the release cycle is `playwright` (^1.63.0), used for browser-verified UI checks.
 
 ---
 
