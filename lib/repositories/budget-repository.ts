@@ -97,7 +97,7 @@ export function getVerifiedOfficialSpend(
           AND u.source IN ${OFFICIAL_SOURCE_SQL}
           AND u.accuracy IN ${VERIFIED_ACCURACY_SQL}
           AND c.provenance = 'source_reported'
-          AND c.currency = ?>
+          AND c.currency = ?
       `
     )
     .get(
