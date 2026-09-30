@@ -61,6 +61,20 @@ const FIT_LABELS: Record<string, string> = {
 const FIT_HINT =
   "Reflects the task's declared capability requirements.";
 
+/*
+ * The three preference plan strategies are the only plans whose steps
+ * generate AI options: generateProjectTaskAiOptions accepts exactly
+ * planner-service's PROJECT_PREFERENCES and rejects every combination
+ * strategy. The list is copied from that contract on purpose and must
+ * stay in sync with it, following the same convention as the strategy
+ * labels on the plan page.
+ */
+const PREFERENCE_PLAN_STRATEGIES = [
+  "cost_first",
+  "time_first",
+  "balanced",
+] as const;
+
 const LABEL_STYLE = {
   fontSize: 12,
   fontWeight: 700,
@@ -264,9 +278,11 @@ async function readOptions(
 
 export default function TaskAiOptions({
   taskId,
+  planStrategy,
   expanded,
 }: {
   taskId: string;
+  planStrategy: string;
   expanded: boolean;
 }) {
   const [options, setOptions] = useState<
@@ -296,6 +312,16 @@ export default function TaskAiOptions({
    * keeps the list on screen while the server confirms it.
    */
   const loading = options === null && error === null;
+
+  /*
+   * Generation only exists for the three preference strategies; the
+   * generate endpoint rejects every combination strategy with
+   * INVALID_STRATEGY. When the plan is not one of them the panel does
+   * not offer the button at all, so the error can never be shown.
+   */
+  const generationEligible = (
+    PREFERENCE_PLAN_STRATEGIES as readonly string[]
+  ).includes(planStrategy);
 
   function handleRetry() {
     setError(null);
@@ -534,23 +560,31 @@ export default function TaskAiOptions({
                 </p>
               ) : null}
 
-              <button
-                type="button"
-                disabled={generating}
-                onClick={handleGenerate}
-                style={{
-                  ...SECONDARY_BUTTON_STYLE,
-                  marginTop: 10,
-                  cursor: generating
-                    ? "default"
-                    : "pointer",
-                  opacity: generating ? 0.6 : 1,
-                }}
-              >
-                {generating
-                  ? "Generating…"
-                  : "Generate AI Options"}
-              </button>
+              {generationEligible ? (
+                <button
+                  type="button"
+                  disabled={generating}
+                  onClick={handleGenerate}
+                  style={{
+                    ...SECONDARY_BUTTON_STYLE,
+                    marginTop: 10,
+                    cursor: generating
+                      ? "default"
+                      : "pointer",
+                    opacity: generating ? 0.6 : 1,
+                  }}
+                >
+                  {generating
+                    ? "Generating…"
+                    : "Generate AI Options"}
+                </button>
+              ) : (
+                <p style={HINT_TEXT_STYLE}>
+                  AI option generation is
+                  unavailable for this plan
+                  strategy.
+                </p>
+              )}
             </>
           ) : (
             <div

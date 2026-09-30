@@ -1438,6 +1438,9 @@ export default function PlanDetailPage() {
                     {loadedTaskIds[task.id] ? (
                       <TaskAiOptions
                         taskId={task.id}
+                        planStrategy={
+                          plan.strategy
+                        }
                         expanded={
                           expandedTaskIds[task.id] ===
                           true

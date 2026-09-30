@@ -23,7 +23,9 @@ export const runtime = "nodejs";
  * Only the descriptive and estimated fields move. plan_id and
  * sequence are not here, so a step cannot be moved to another plan or
  * reordered by accident, and status is not here either: it follows its
- * own guarded transition, which this phase does not expose.
+ * own guarded transition, which this phase does not expose. taskId is
+ * not here either: the execution-task link is a separate command
+ * (linkProjectTaskToExecutionTask) and is not part of an edit.
  */
 const PATCH_FIELDS: readonly PlannerFieldSpec[] = [
   { key: "name", type: "string" },
@@ -43,7 +45,6 @@ const PATCH_FIELDS: readonly PlannerFieldSpec[] = [
   { key: "estimatedInputTokensMax", type: "number" },
   { key: "estimatedOutputTokensMin", type: "number" },
   { key: "estimatedOutputTokensMax", type: "number" },
-  { key: "taskId", type: "string" },
 ];
 
 /*

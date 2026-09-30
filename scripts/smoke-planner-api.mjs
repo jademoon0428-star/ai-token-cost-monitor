@@ -780,6 +780,7 @@ await check("16. the client cannot move a step, reorder it, or set its status", 
     "id",
     "createdAt",
     "is_selected",
+    "taskId",
   ];
 
   return forbidden.reduce(
