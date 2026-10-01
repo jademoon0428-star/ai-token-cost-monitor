@@ -3,12 +3,15 @@ import { NextResponse } from "next/server";
 import {
   getActiveSession,
   getTask,
+  getTaskUsageBundles,
   listTaskHistory,
 } from "@/lib/repositories/task-repository";
 import {
   abandonTaskSession,
+  associateUsageRecord,
   completeTaskSession,
   createTask,
+  getTaskSessionVerifiedCost,
   startTaskSession,
   TaskServiceError,
 } from "@/lib/services/task-service";
@@ -22,10 +25,12 @@ function taskErrorStatus(
     case "ACTIVE_SESSION_EXISTS":
     case "SESSION_NOT_ACTIVE":
     case "SESSION_TASK_MISMATCH":
+    case "USAGE_ALREADY_ATTRIBUTED":
       return 409;
 
     case "TASK_NOT_FOUND":
     case "SESSION_NOT_FOUND":
+    case "USAGE_NOT_FOUND":
       return 404;
 
     case "INVALID_TASK_NAME":
@@ -39,10 +44,30 @@ export async function GET() {
   try {
     const activeSession = getActiveSession();
 
+    /*
+     * Recomputed on every read, never persisted. The count is scoped
+     * to the active session so it reports what this run of work has
+     * attributed so far, and the cost is null whenever the all-or-
+     * nothing reliability rule does not hold, which the Dashboard
+     * renders as "unavailable" rather than zero.
+     */
     const active = activeSession
       ? {
           task: getTask(activeSession.task_id) ?? null,
           session: activeSession,
+          usage: {
+            attributed_count: getTaskUsageBundles(
+              activeSession.task_id
+            ).filter(
+              (bundle) =>
+                bundle.task_session_id ===
+                activeSession.id
+            ).length,
+            verified_cost:
+              getTaskSessionVerifiedCost(
+                activeSession.id
+              ),
+          },
         }
       : null;
 
@@ -153,6 +178,56 @@ export async function POST(
         ok: true,
         session_id: ended.id,
         status: ended.status,
+      });
+    }
+
+    if (action === "usage/attach") {
+      const usageRecordId =
+        typeof body.usage_record_id === "string"
+          ? body.usage_record_id.trim()
+          : "";
+
+      if (!usageRecordId) {
+        return NextResponse.json(
+          {
+            error:
+              "usage_record_id must be a non-empty string.",
+          },
+          { status: 400 }
+        );
+      }
+
+      /*
+       * Only one task session can be active at a time, so the target
+       * is resolved server-side. The client cannot pick a task or a
+       * session, and therefore cannot steer the attribution.
+       */
+      const session =
+        getActiveSession();
+
+      if (!session) {
+        return NextResponse.json(
+          {
+            error:
+              "No active session to attach usage to.",
+          },
+          { status: 400 }
+        );
+      }
+
+      const { inserted } =
+        associateUsageRecord({
+          taskId: session.task_id,
+          usageRecordId,
+          sessionId: session.id,
+        });
+
+      return NextResponse.json({
+        ok: true,
+        inserted,
+        task_id: session.task_id,
+        task_session_id: session.id,
+        usage_record_id: usageRecordId,
       });
     }
 

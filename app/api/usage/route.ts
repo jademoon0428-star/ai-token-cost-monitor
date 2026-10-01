@@ -7,6 +7,8 @@ import {
   insertUsageRecord,
 } from "@/lib/repositories/usage-repository";
 
+import { autoAttributeUsageRecord } from "@/lib/services/task-service";
+
 import type { NormalizedUsage } from "@/providers/types";
 
 export const runtime = "nodejs";
@@ -69,10 +71,33 @@ export async function POST(
 
     const id = insertUsageRecord(body);
 
+    /*
+     * Attribution is an extra step layered on top of storing the
+     * usage record, not part of it. The row is already committed, so
+     * this runs strictly afterwards and never rolls it back: the
+     * request only fails if storing the usage itself failed, which
+     * has already been handled above.
+     */
+    let attribution: string;
+
+    try {
+      attribution = autoAttributeUsageRecord({
+        usageRecordId: id,
+      });
+    } catch (error) {
+      console.warn(
+        "[Usage API] Usage was stored but automatic task attribution failed:",
+        error
+      );
+
+      attribution = "failed";
+    }
+
     return NextResponse.json(
       {
         id,
         status: "created",
+        task_attribution: attribution,
       },
       { status: 201 }
     );

@@ -283,6 +283,36 @@ export function endTaskSession(
 }
 
 /*
+ * Returns the task session a usage record is already attributed to,
+ * or undefined when it is unattributed.
+ *
+ * UNIQUE(task_session_id, usage_record_id) only dedupes within one
+ * session, so this is what lets the service reject a second
+ * attribution instead of double-counting the record's cost. It reads
+ * through idx_task_usage_usage on usage_record_id.
+ */
+export function findTaskSessionIdByUsageRecord(
+  usageRecordId: string
+): string | undefined {
+  initDb();
+
+  const row = getDb()
+    .prepare(
+      `
+        SELECT task_session_id
+        FROM task_usage_records
+        WHERE usage_record_id = ?
+        LIMIT 1
+      `
+    )
+    .get(usageRecordId) as
+    | { task_session_id: string }
+    | undefined;
+
+  return row?.task_session_id;
+}
+
+/*
  * Associates a usage record with a task session.
  *
  * Returns true when a new association row was inserted and false

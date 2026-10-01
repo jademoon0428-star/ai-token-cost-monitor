@@ -66,6 +66,13 @@ type TaskSessionState = {
     ended_at: string | null;
     status: string;
   };
+  usage: {
+    attributed_count: number;
+    verified_cost: {
+      amountMicros: number;
+      currency: string;
+    } | null;
+  };
 };
 
 type TaskHistoryRow = {
@@ -459,6 +466,28 @@ function formatTaskElapsed(
     String(value).padStart(2, "0");
 
   return `${hours}h ${pad(minutes)}m ${pad(seconds)}s`;
+}
+
+/*
+ * Renders a verified task cost, which is null whenever the
+ * all-or-nothing reliability rule does not hold. "unavailable" is
+ * deliberately distinct from a zero cost: no reliable number is not
+ * the same as a free session.
+ */
+function formatTaskCost(
+  cost: {
+    amountMicros: number;
+    currency: string;
+  } | null
+): string {
+  if (!cost) {
+    return "unavailable";
+  }
+
+  return money(
+    cost.amountMicros / 1000000,
+    cost.currency
+  );
 }
 
 function formatTaskTime(iso: string): string {
@@ -1221,6 +1250,43 @@ export default function Dashboard() {
                     taskNow
                   )}
                 </strong>
+              </div>
+
+              <div
+                style={{
+                  display: "flex",
+                  gap: "18px",
+                  flexWrap: "wrap",
+                  fontSize: "13px",
+                  color: "#64748b",
+                  marginBottom: "14px",
+                }}
+              >
+                <span>
+                  Attributed usage:{" "}
+                  <strong
+                    style={{
+                      color: "#172033",
+                    }}
+                  >
+                    {taskData.active.usage
+                      ?.attributed_count ?? 0}
+                  </strong>
+                </span>
+
+                <span>
+                  Verified cost:{" "}
+                  <strong
+                    style={{
+                      color: "#172033",
+                    }}
+                  >
+                    {formatTaskCost(
+                      taskData.active.usage
+                        ?.verified_cost ?? null
+                    )}
+                  </strong>
+                </span>
               </div>
 
               <div

@@ -150,16 +150,51 @@ const USAGE_NO_COST = "smoke_usage_no_cost";
 const USAGE_ESTIMATED = "smoke_usage_estimated";
 const USAGE_USD = "smoke_usage_usd";
 
+/*
+ * Each later task owns its own usage records. A usage record may be
+ * attributed to exactly one session, so a record cannot be reused to
+ * build a second task's bundle.
+ */
+const USAGE_MIXED_CNY = "smoke_usage_mixed_cny";
+const USAGE_TASK_C_NO_COST = "smoke_usage_task_c_no_cost";
+const USAGE_TASK_D_ESTIMATED = "smoke_usage_task_d_estimated";
+const USAGE_TASK_F_CNY = "smoke_usage_task_f_cny";
+const USAGE_TASK_F_ESTIMATED = "smoke_usage_task_f_estimated";
+const USAGE_TASK_G_CNY_1 = "smoke_usage_task_g_cny_1";
+const USAGE_TASK_G_CNY_2 = "smoke_usage_task_g_cny_2";
+const USAGE_TASK_G_CNY_3 = "smoke_usage_task_g_cny_3";
+const USAGE_TASK_E_CNY = "smoke_usage_task_e_cny";
+const USAGE_TASK_E_NO_COST = "smoke_usage_task_e_no_cost";
+const USAGE_UNATTRIBUTED = "smoke_usage_unattributed";
+
 seedUsage(USAGE_CNY_1, "2026-09-01T00:00:00.000Z", "official_export", "verified");
 seedUsage(USAGE_CNY_2, "2026-09-02T00:00:00.000Z", "official_api", "verified");
 seedUsage(USAGE_NO_COST, "2026-09-03T00:00:00.000Z", "official_export", "verified");
 seedUsage(USAGE_ESTIMATED, "2026-09-04T00:00:00.000Z", "local_estimate", "estimated");
 seedUsage(USAGE_USD, "2026-09-05T00:00:00.000Z", "official_export", "verified");
 
+seedUsage(USAGE_MIXED_CNY, "2026-09-06T00:00:00.000Z", "official_export", "verified");
+seedUsage(USAGE_TASK_C_NO_COST, "2026-09-07T00:00:00.000Z", "official_export", "verified");
+seedUsage(USAGE_TASK_D_ESTIMATED, "2026-09-08T00:00:00.000Z", "local_estimate", "estimated");
+seedUsage(USAGE_TASK_F_CNY, "2026-09-09T00:00:00.000Z", "official_export", "verified");
+seedUsage(USAGE_TASK_F_ESTIMATED, "2026-09-10T00:00:00.000Z", "local_estimate", "estimated");
+seedUsage(USAGE_TASK_G_CNY_1, "2026-09-11T00:00:00.000Z", "official_export", "verified");
+seedUsage(USAGE_TASK_G_CNY_2, "2026-09-12T00:00:00.000Z", "official_export", "verified");
+seedUsage(USAGE_TASK_E_CNY, "2026-09-13T00:00:00.000Z", "official_export", "verified");
+seedUsage(USAGE_TASK_E_NO_COST, "2026-09-14T00:00:00.000Z", "official_export", "verified");
+seedUsage(USAGE_TASK_G_CNY_3, "2026-09-15T00:00:00.000Z", "official_export", "verified");
+seedUsage(USAGE_UNATTRIBUTED, "2026-09-16T00:00:00.000Z", "official_export", "verified");
+
 seedCost("smoke_cost_cny_1", USAGE_CNY_1, 123450000, "CNY");
 seedCost("smoke_cost_cny_2", USAGE_CNY_2, 67890, "CNY");
 seedCost("smoke_cost_estimated", USAGE_ESTIMATED, 111, "USD", "estimated");
 seedCost("smoke_cost_usd", USAGE_USD, 333, "USD");
+seedCost("smoke_cost_mixed_cny", USAGE_MIXED_CNY, 500000, "CNY");
+seedCost("smoke_cost_task_f_cny", USAGE_TASK_F_CNY, 222, "CNY");
+seedCost("smoke_cost_task_f_estimated", USAGE_TASK_F_ESTIMATED, 111, "USD", "estimated");
+seedCost("smoke_cost_task_g_cny_1", USAGE_TASK_G_CNY_1, 123450000, "CNY");
+seedCost("smoke_cost_task_g_cny_2", USAGE_TASK_G_CNY_2, 67890, "CNY");
+seedCost("smoke_cost_task_e_cny", USAGE_TASK_E_CNY, 999, "CNY");
 
 for (const { id, name } of [
   { id: TASK_A, name: "Refactor v1.4-A" },
@@ -433,7 +468,7 @@ check("16. mixed-currency task cost is unavailable (null), never converted", () 
     sessionId: "smoke-session-4",
   });
 
-  for (const usageId of [USAGE_CNY_1, USAGE_USD]) {
+  for (const usageId of [USAGE_MIXED_CNY, USAGE_USD]) {
     taskService.associateUsageRecord({
       taskId: TASK_B,
       sessionId: session.id,
@@ -459,7 +494,7 @@ check("17. task whose only association has no cost record is unavailable (null)"
   taskService.associateUsageRecord({
     taskId: TASK_C,
     sessionId: session.id,
-    usageRecordId: USAGE_NO_COST,
+    usageRecordId: USAGE_TASK_C_NO_COST,
   });
 
   const cost = taskService.getTaskVerifiedCost(TASK_C);
@@ -480,7 +515,7 @@ check("18. task with only unreliable attribution is unavailable (null), not an e
   taskService.associateUsageRecord({
     taskId: TASK_D,
     sessionId: session.id,
-    usageRecordId: USAGE_ESTIMATED,
+    usageRecordId: USAGE_TASK_D_ESTIMATED,
   });
 
   const cost = taskService.getTaskVerifiedCost(TASK_D);
@@ -498,7 +533,7 @@ check("19. all-reliable single-currency task returns the verified sum", () => {
     sessionId: "smoke-session-7",
   });
 
-  for (const usageId of [USAGE_CNY_1, USAGE_CNY_2]) {
+  for (const usageId of [USAGE_TASK_G_CNY_1, USAGE_TASK_G_CNY_2]) {
     taskService.associateUsageRecord({
       taskId: TASK_G,
       sessionId: session.id,
@@ -511,17 +546,17 @@ check("19. all-reliable single-currency task returns the verified sum", () => {
   if (!cost || cost.amountMicros !== 123517890 || cost.currency !== "CNY") {
     throw new Error(`all-reliable task should be {123517890, CNY}, got ${JSON.stringify(cost)}`);
   }
+
+  taskService.completeTaskSession({ sessionId: session.id });
 });
 
 check("20. verified official CNY cost + official-verified usage without cost_record -> null", () => {
-  taskService.completeTaskSession({ sessionId: "smoke-session-7" });
-
   const session = taskService.startTaskSession({
     taskId: TASK_E,
     sessionId: "smoke-session-8",
   });
 
-  for (const usageId of [USAGE_CNY_1, USAGE_NO_COST]) {
+  for (const usageId of [USAGE_TASK_E_CNY, USAGE_TASK_E_NO_COST]) {
     taskService.associateUsageRecord({
       taskId: TASK_E,
       sessionId: session.id,
@@ -544,7 +579,7 @@ check("21. verified official CNY cost + local_estimate/estimated cost -> null", 
     sessionId: "smoke-session-9",
   });
 
-  for (const usageId of [USAGE_CNY_1, USAGE_ESTIMATED]) {
+  for (const usageId of [USAGE_TASK_F_CNY, USAGE_TASK_F_ESTIMATED]) {
     taskService.associateUsageRecord({
       taskId: TASK_F,
       sessionId: session.id,
@@ -557,9 +592,107 @@ check("21. verified official CNY cost + local_estimate/estimated cost -> null", 
   if (cost !== null) {
     throw new Error(`verified cost + estimated cost should be null, got ${JSON.stringify(cost)}`);
   }
+
+  taskService.completeTaskSession({ sessionId: "smoke-session-9" });
 });
 
-check("22. smoke test is fully isolated from the production and project databases", () => {
+check("22. a usage record already attributed to another task is refused", () => {
+  const session = taskService.startTaskSession({
+    taskId: TASK_B,
+    sessionId: "smoke-session-10",
+  });
+
+  expectTaskServiceError(
+    () =>
+      taskService.associateUsageRecord({
+        taskId: TASK_B,
+        sessionId: session.id,
+        usageRecordId: USAGE_CNY_1,
+      }),
+    "USAGE_ALREADY_ATTRIBUTED"
+  );
+
+  if (
+    taskRepository
+      .getTaskUsageBundles(TASK_B)
+      .some(
+        (bundle) =>
+          bundle.usage_record_id === USAGE_CNY_1
+      )
+  ) {
+    throw new Error("refused usage record was still attached to task B");
+  }
+
+  taskService.completeTaskSession({ sessionId: "smoke-session-10" });
+});
+
+check("23. a usage record already attributed to another session of the SAME task is refused", () => {
+  const first = taskService.startTaskSession({
+    taskId: TASK_G,
+    sessionId: "smoke-session-11",
+  });
+
+  taskService.associateUsageRecord({
+    taskId: TASK_G,
+    sessionId: first.id,
+    usageRecordId: USAGE_TASK_G_CNY_3,
+  });
+
+  taskService.completeTaskSession({ sessionId: first.id });
+  const second = taskService.startTaskSession({
+    taskId: TASK_G,
+    sessionId: "smoke-session-12",
+  });
+
+  /*
+   * The same task re-opening a session must not be able to re-attach
+   * the record: getTaskUsageBundles joins every session of the task,
+   * so a second row would count the same cost twice.
+   */
+  expectTaskServiceError(
+    () =>
+      taskService.associateUsageRecord({
+        taskId: TASK_G,
+        sessionId: second.id,
+        usageRecordId: USAGE_TASK_G_CNY_3,
+      }),
+    "USAGE_ALREADY_ATTRIBUTED"
+  );
+
+  const owners = taskRepository
+    .getTaskUsageBundles(TASK_G)
+    .filter((bundle) => bundle.usage_record_id === USAGE_TASK_G_CNY_3)
+    .map((bundle) => bundle.task_session_id);
+
+  if (owners.length !== 1 || owners[0] !== first.id) {
+    throw new Error(
+      `usage record ended up in more than one session of task G: ${owners.join(", ") || "none"}`
+    );
+  }
+
+  taskService.completeTaskSession({ sessionId: second.id });
+});
+
+check("24. an unattributed usage record can be attached to a new session", () => {
+  const session = taskService.startTaskSession({
+    taskId: TASK_A,
+    sessionId: "smoke-session-13",
+  });
+
+  const result = taskService.associateUsageRecord({
+    taskId: TASK_A,
+    sessionId: session.id,
+    usageRecordId: USAGE_UNATTRIBUTED,
+  });
+
+  if (result.inserted !== true) {
+    throw new Error("unattributed usage record should report inserted=true");
+  }
+
+  taskService.completeTaskSession({ sessionId: "smoke-session-13" });
+});
+
+check("25. smoke test is fully isolated from the production and project databases", () => {
   const normalized = path.normalize(TEMP_DIR);
 
   if (!dbPath.startsWith(normalized)) {

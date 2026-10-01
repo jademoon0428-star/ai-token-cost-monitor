@@ -6,6 +6,7 @@ import {
   createTask as createTaskInDb,
   createTaskSession,
   endTaskSession as endTaskSessionInDb,
+  findTaskSessionIdByUsageRecord,
   getActiveSession,
   getSession,
   getTask,
@@ -14,6 +15,7 @@ import {
 import type {
   TaskRow,
   TaskSessionRow,
+  TaskUsageBundle,
 } from "@/lib/repositories/task-repository";
 
 export type TaskStatus = "open" | "closed";
@@ -236,6 +238,30 @@ export function associateUsageRecord(input: {
     );
   }
 
+  /*
+   * A usage record is attributed to at most one session.
+   *
+   * UNIQUE(task_session_id, usage_record_id) only dedupes within a
+   * single session, so without this guard the same usage record could
+   * be attached to a second session and its cost would be counted
+   * twice for that task. Re-attaching to the session that already
+   * holds it stays idempotent and is handled by the insert below.
+   */
+  const attributedSessionId =
+    findTaskSessionIdByUsageRecord(
+      input.usageRecordId
+    );
+
+  if (
+    attributedSessionId !== undefined &&
+    attributedSessionId !== sessionId
+  ) {
+    throw new TaskServiceError(
+      "USAGE_ALREADY_ATTRIBUTED",
+      `usage record "${input.usageRecordId}" is already attributed to task session "${attributedSessionId}"`
+    );
+  }
+
   try {
     const inserted = associateUsageRecordInDb({
       id: input.associationId ?? randomUUID(),
@@ -257,6 +283,64 @@ export function associateUsageRecord(input: {
         "USAGE_NOT_FOUND",
         `usage record "${input.usageRecordId}" does not exist`
       );
+    }
+
+    throw error;
+  }
+}
+
+/*
+ * Attaches a newly recorded usage record to the one active task
+ * session, without the caller having to know which session that is.
+ *
+ * This is the automatic counterpart to the manual usage/attach API
+ * action: a usage record produced while a task session is running
+ * belongs to it. Attribution is an additional concern layered on top
+ * of storing the usage record, so every expected outcome is reported
+ * in the result instead of thrown, and the caller is expected to
+ * ignore it:
+ *
+ *   "skipped"  no active session, nothing to attribute to
+ *   "inserted" the record now belongs to the active session
+ *   "existing" the record was already attributed to that session
+ *   "conflict" the record already belongs to a different session
+ *
+ * "conflict" is expected rather than exceptional, so it must not make
+ * the caller's own work fail. The single active session is read here
+ * exactly as elsewhere, so the uniqueness guarantee is unchanged.
+ */
+export type AutoAttributionResult =
+  | "skipped"
+  | "inserted"
+  | "existing"
+  | "conflict";
+
+export function autoAttributeUsageRecord(input: {
+  usageRecordId: string;
+}): AutoAttributionResult {
+  const active = getActiveSession();
+
+  if (!active) {
+    return "skipped";
+  }
+
+  try {
+    const { inserted } = associateUsageRecord({
+      taskId: active.task_id,
+      sessionId: active.id,
+      usageRecordId: input.usageRecordId,
+      attributionStatus: "auto",
+    });
+
+    return inserted ? "inserted" : "existing";
+  } catch (error) {
+    if (
+      error instanceof TaskServiceError &&
+      (error.code === "USAGE_ALREADY_ATTRIBUTED" ||
+        error.code === "SESSION_NOT_ACTIVE" ||
+        error.code === "SESSION_TASK_MISMATCH")
+    ) {
+      return "conflict";
     }
 
     throw error;
@@ -295,8 +379,39 @@ function activeSessionIdForTask(
 export function getTaskVerifiedCost(
   taskId: string
 ): TaskVerifiedCost {
-  const bundles = getTaskUsageBundles(taskId);
+  return verifiedCostFromBundles(
+    getTaskUsageBundles(taskId)
+  );
+}
 
+/*
+ * The same verified-cost rule applied to one session's own bundles.
+ *
+ * getTaskVerifiedCost spans every session of a task, which is the
+ * right answer for a task total. While a session is still active that
+ * would mix in what earlier sessions of the same task already spent,
+ * so the active-session figure is scoped to that session instead.
+ */
+export function getTaskSessionVerifiedCost(
+  sessionId: string
+): TaskVerifiedCost {
+  const session = getSession(sessionId);
+
+  if (!session) {
+    return null;
+  }
+
+  return verifiedCostFromBundles(
+    getTaskUsageBundles(session.task_id).filter(
+      (bundle) =>
+        bundle.task_session_id === sessionId
+    )
+  );
+}
+
+function verifiedCostFromBundles(
+  bundles: TaskUsageBundle[]
+): TaskVerifiedCost {
   const reliable = bundles.filter(
     (bundle) =>
       bundle.cost_record_id !== null &&
