@@ -31,6 +31,7 @@ export type TaskUsageBundle = {
   task_session_id: string;
   task_id: string;
   usage_record_id: string;
+  attribution_status: string;
   provider: string;
   model: string;
   timestamp: string;
@@ -313,6 +314,33 @@ export function findTaskSessionIdByUsageRecord(
 }
 
 /*
+ * Counts usage records that hold no task_usage_records row at all:
+ * records ingested while no session was active, and records from
+ * imports that were never attached. Read-only coverage context for
+ * the productivity report; it attributes nothing and decides
+ * nothing.
+ */
+export function countUnattributedUsageRecords(): number {
+  initDb();
+
+  const row = getDb()
+    .prepare(
+      `
+        SELECT COUNT(*) AS count
+        FROM usage_records u
+        WHERE NOT EXISTS (
+          SELECT 1
+          FROM task_usage_records tur
+          WHERE tur.usage_record_id = u.id
+        )
+      `
+    )
+    .get() as { count: number };
+
+  return Number(row.count);
+}
+
+/*
  * Associates a usage record with a task session.
  *
  * Returns true when a new association row was inserted and false
@@ -366,6 +394,7 @@ export function getTaskUsageBundles(
           tur.task_session_id,
           ts.task_id,
           u.id AS usage_record_id,
+          tur.attribution_status,
           p.name AS provider,
           m.name AS model,
           u.timestamp,

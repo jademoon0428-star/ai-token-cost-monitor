@@ -22,6 +22,7 @@
     "smoke:planner-evidence": "node --experimental-strip-types scripts/smoke-planner-evidence.mjs",
     "smoke:planner-c1": "node --experimental-strip-types scripts/smoke-planner-c1-unify.mjs",
     "smoke:ai-resources": "node --experimental-strip-types scripts/smoke-ai-resources.mjs",
+    "smoke:planner-productivity": "node --experimental-strip-types scripts/smoke-planner-productivity.mjs",
     "seed:registry": "node --experimental-strip-types scripts/seed-ai-registry.mjs",
     "import:deepseek": "node scripts/import-deepseek-export.mjs",
     "sync:deepseek": "node scripts/sync-deepseek.mjs",
