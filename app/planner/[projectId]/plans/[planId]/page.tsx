@@ -8,6 +8,8 @@ import {
 } from "react";
 
 import TaskAiOptions from "@/components/planner/task-ai-options";
+import PlanProductivity from "@/components/planner/plan-productivity";
+import type { PlanProductivityReport } from "@/components/planner/plan-productivity";
 
 type ProjectPlanRow = {
   id: string;
@@ -385,6 +387,11 @@ export default function PlanDetailPage() {
   const [assignmentsError, setAssignmentsError] = useState<
     string | null
   >(null);
+  const [productivity, setProductivity] =
+    useState<PlanProductivityReport | null>(null);
+  const [productivityError, setProductivityError] = useState<
+    string | null
+  >(null);
   const [notFound, setNotFound] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
 
@@ -461,6 +468,18 @@ export default function PlanDetailPage() {
       fetch(`/api/planner/plans/${planId}/assignments`, {
         cache: "no-store",
       }).then(readJson),
+      /*
+       * The productivity report is display-only context. A network
+       * failure rejects before readJson ever sees a body, so this
+       * one carries its own catch: it degrades to null and the
+       * handler below turns that into an inline error with its own
+       * Retry instead of failing the whole plan detail.
+       */
+      fetch(`/api/planner/plans/${planId}/productivity`, {
+        cache: "no-store",
+      })
+        .then(readJson)
+        .catch(() => null),
     ])
       .then(
         ([
@@ -468,6 +487,7 @@ export default function PlanDetailPage() {
           projectResult,
           tasksResult,
           assignmentsResult,
+          productivityResult,
         ]) => {
           if (cancelled) {
             return;
@@ -542,6 +562,40 @@ export default function PlanDetailPage() {
                 ? assignmentsResult.data.error
                 : "Could not load assignments"
             );
+          }
+
+          /*
+           * Productivity is never fatal to the page: any failure
+           * (including the null from the fetch-level catch above)
+           * becomes an inline error with its own Retry, exactly
+           * like the assignments section above.
+           */
+          if (
+            productivityResult === null ||
+            !productivityResult.response.ok ||
+            !productivityResult.data?.ok
+          ) {
+            setProductivity(null);
+            setProductivityError(
+              productivityResult !== null &&
+                typeof productivityResult.data?.error ===
+                  "string"
+                ? productivityResult.data.error
+                : "Could not load productivity"
+            );
+          } else {
+            const payload =
+              productivityResult.data as unknown as {
+                ok: true;
+              } & PlanProductivityReport;
+
+            setProductivity({
+              plan: payload.plan,
+              tasks: payload.tasks,
+              summary: payload.summary,
+              context: payload.context,
+            });
+            setProductivityError(null);
           }
 
           setLoading(false);
@@ -1727,6 +1781,16 @@ export default function PlanDetailPage() {
                 })}
               </div>
             )}
+          </div>
+
+          <div style={cardStyle}>
+            <PlanProductivity
+              report={productivity}
+              error={productivityError}
+              onRetry={() =>
+                setReloadKey((key) => key + 1)
+              }
+            />
           </div>
         </>
       ) : null}
