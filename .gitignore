@@ -65,3 +65,4 @@ data/*.db-wal
 .desktop-*
 setup.inf
 setup.rpt
+/release

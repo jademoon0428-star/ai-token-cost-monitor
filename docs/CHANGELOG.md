@@ -4,6 +4,51 @@ All notable changes to AI Cost Management, newest first.
 
 Derived from the git history. Released versions are frozen; the `[Unreleased]` section is additive and does not modify them.
 
+## [1.5.4] — 2026-10-07
+
+Planner project stages, the Planner Productivity Report (API and UI, read-only), and the Plan Detail resource display-name fix. The only schema change is the new `project_stages` table, created automatically on upgrade; no manual migration is required.
+
+### Added — Planner project stages
+
+- New `project_stages` table, created automatically at startup (`CREATE TABLE IF NOT EXISTS`); no manual migration.
+- Stage CRUD and archive API: list/create stages per project (`/api/planner/projects/[id]/stages`), update and archive per stage (`/api/planner/stages/[id]`, `/api/planner/stages/[id]/archive`).
+- Task grouping: tasks can belong to a stage, returned alongside plan tasks and task reads.
+- Project detail and Plan Detail UI: stage management panel and stage grouping of plan steps.
+
+### Added — Planner Productivity Report (read-only)
+
+- `GET /api/planner/plans/[id]/productivity` endpoint backed by a new productivity service, computed from existing verified facts.
+- Productivity panel in Plan Detail. Display only: no writes, no new judgements, no price or ranking semantics.
+- Smoke coverage via `scripts/smoke-planner-productivity.mjs`.
+
+### Fixed — Plan Detail resource display names
+
+- The plan assignments API now returns `resource_name` and `resource_provider`, resolved from records that already exist (`ai_resources.name` for registered resources; registry provider and model name for registry models).
+- Plan Detail shows the resolved name (for example `provider · model`); when no name exists it falls back to the stored `registry_model_id` / `ai_resource_id`. No name is ever invented.
+
+## [1.5.3] — 2026-10-01
+
+Task Sessions connected to usage attribution. Recorded from git history after release; version released 2026-10-01.
+
+### Added — Task Session usage attribution
+
+- Usage records can be attributed to a Task Session, with duplicate/conflict protection.
+- Verified task-session usage and cost are reflected in the Task Session workflow.
+- Version identity aligned at 1.5.3.
+
+## [1.5.2] — 2026-09-30
+
+Minimal fix release: Budget page repair and official cost integrity hardening. No schema or data-model changes. Recorded from git history after release; version released 2026-09-30.
+
+### Fixed — Budget page
+
+- A single-character SQL typo in the official spend query made `GET /api/budget` fail with an internal SQLite error, so the Budget page could not load data.
+
+### Fixed — official cost integrity (P0)
+
+- Hardened official cost integrity across the import, saving, efficiency, and cost-policy paths.
+- Removed dead code from the DeepSeek provider and import routes.
+
 ## [1.5.1] — 2026-09-30
 
 AI Registry v1, AI Project Planner, Planner resources and combination plans, plus the Planner AI-option generation UI, the task PATCH contract fix, and the production standalone static-assets fix. v1.5.0 was an interim version bump on `master`; it was never packaged and its content shipped as part of v1.5.1.

@@ -176,3 +176,31 @@ AI-Cost-Management-Setup.exe
 
 ## Package
 AI-Cost-Management-Payload.cab
+
+---
+
+# AI Cost Management v1.5.4
+
+## Release Status
+Final
+
+## Version
+1.5.4
+
+## Date
+2026-10-07
+
+## Changes in v1.5.4
+- Planner project stages: a new `project_stages` table (created automatically on upgrade, no manual migration), stage CRUD and archive API, task grouping by stage, and stage management in the project and Plan Detail UI.
+- Planner Productivity Report: a read-only productivity endpoint for a plan plus the productivity panel in Plan Detail. Display only; no data is written and no new judgements are introduced.
+- Plan Detail resource display names: assignments show the resolved resource name and provider (registered resource `name`; registry model provider and model name), falling back to the stored `registry_model_id` / `ai_resource_id` only when no name exists.
+- Upgrade note: the only schema change is the new `project_stages` table, created automatically at startup; no manual migration is required.
+
+## Installer
+AI-Cost-Management-Setup.exe
+
+## Package
+AI-Cost-Management-Payload.cab
+
+## Installer SHA256
+Pending — to be filled after the official v1.5.4 package is built.
