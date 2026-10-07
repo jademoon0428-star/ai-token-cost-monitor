@@ -43,11 +43,23 @@ import type {
 import {
   listAiRegistry,
   resolveRegistryPricing,
+  type RegistryModel,
 } from "@/lib/registry/ai-registry-repository";
 import { generatePlannerCandidates } from "@/lib/planner/candidate-generator";
+import {
+  buildResourceUniverse,
+  deriveModelState,
+  type ResourceAvailabilityState,
+  type ResourceCapabilityState,
+  type ResourceEntitlementState,
+  type ResourcePricingState,
+  type ResourceRegistrationState,
+  type ResourceSource,
+} from "@/lib/planner/resource-universe";
 import { resolveRegisteredPricing } from "@/lib/planner/registered-pricing";
 import {
   listAiResources,
+  type AiResourceChannel,
   type AiResourceRow,
 } from "@/lib/repositories/ai-resource-repository";
 
@@ -1258,7 +1270,7 @@ export function linkProjectTaskToExecutionTask(
  * than written.
  */
 function normalizeAiOptionFields(input: {
-  modelId: string;
+  modelId?: string | null;
   toolId?: string | null;
   isSelected?: 0 | 1;
   costMinMicros?: number | null;
@@ -1271,7 +1283,7 @@ function normalizeAiOptionFields(input: {
   pricingBasis?: string | null;
   rationale?: string | null;
 }): {
-  modelId: string;
+  modelId: string | null;
   toolId: string | null;
   isSelected: 0 | 1;
   costMinMicros: number | null;
@@ -1325,8 +1337,26 @@ function normalizeAiOptionFields(input: {
     "time"
   );
 
+  /*
+   * A candidate refers to a resource by its registry model, and the
+   * table's CHECK refuses a row that names none. Rejecting it here
+   * reports the problem instead of letting SQLite do it.
+   */
+  const modelId =
+    input.modelId === null ||
+    input.modelId === undefined
+      ? null
+      : assertModelExists(input.modelId);
+
+  if (modelId === null) {
+    fail(
+      "INVALID_RESOURCE_REFERENCE",
+      "an option must reference a model"
+    );
+  }
+
   return {
-    modelId: assertModelExists(input.modelId),
+    modelId,
     toolId: assertToolExists(input.toolId),
     isSelected: input.isSelected ?? 0,
     costMinMicros: costMin,
@@ -1405,9 +1435,10 @@ export function createProjectTaskAiOption(input: {
  * generator is wrong, the fix belongs there, not here.
  *
  * The plan is read, not the caller's word. strategy and created_at
- * come from project_plans, and the models come from the AI Registry,
- * so a caller cannot pass in a different strategy, a different
- * pricing instant or a hand-picked model list.
+ * come from project_plans, and the resources come from the AI
+ * Registry plus the user's active registered resources, so a caller
+ * cannot pass in a different strategy, a different pricing instant or
+ * a hand-picked list.
  *
  * plan.created_at is the frozen pricing basis for every candidate in
  * this batch. The current time is never used to price anything, which
@@ -1447,10 +1478,10 @@ export function generateProjectTaskAiOptions(
   );
 
   /*
-   * The registry is the only source of candidate models. A model that
-   * is registered but unpriced still becomes a candidate, with a null
-   * cost, because "we do not know the price" is a fact worth showing
-   * and not a reason to hide the model.
+   * The two inventories, read once. A registry model with no
+   * entitlement record still becomes a candidate with a null cost,
+   * because "we do not know the price" is a fact worth showing and not
+   * a reason to hide it.
    */
   const models = listAiRegistry().flatMap(
     (provider) => provider.models
@@ -1471,14 +1502,16 @@ export function generateProjectTaskAiOptions(
    * (listAiResources order: created_at, then id) decides, so the whole
    * generation is deterministic.
    */
+  const activeResources = listAiResources({
+    status: "active",
+  });
+
   const registeredByModelId = new Map<
     string,
     AiResourceRow
   >();
 
-  for (const resource of listAiResources({
-    status: "active",
-  })) {
+  for (const resource of activeResources) {
     if (!registeredByModelId.has(resource.model_id)) {
       registeredByModelId.set(
         resource.model_id,
@@ -1486,6 +1519,19 @@ export function generateProjectTaskAiOptions(
       );
     }
   }
+
+  /*
+   * The candidate set is one list assembled from the two inventories.
+   *
+   * What is NOT stored here: resource_source. Whether a model is
+   * currently backed by an active ai_resources row is read back at
+   * request time, so an option can never go on claiming a
+   * registration that has since been archived.
+   */
+  const universe = buildResourceUniverse({
+    registryModels: models,
+    activeResources,
+  });
 
   const generated = generatePlannerCandidates({
     task: {
@@ -1505,6 +1551,7 @@ export function generateProjectTaskAiOptions(
     planCreatedAt: plan.created_at,
     strategy,
     models,
+    universe,
     /*
      * Injected rather than reimplemented. The repository's resolver
      * is the single authority on which rate applies at an instant; a
@@ -1563,6 +1610,112 @@ export function generateProjectTaskAiOptions(
    * id. Callers must treat the result as an unordered set.
    */
   return listProjectTaskAiOptions(projectTaskId);
+}
+
+/*
+ * A stored candidate plus what the app knows about the thing it
+ * refers to, at the moment it is read.
+ *
+ * The state is derived here rather than stored, on purpose: it
+ * describes the CURRENT inventories. A candidate generated against an
+ * active registration stops claiming that registration as soon as it
+ * is archived.
+ *
+ * pricingState comes from the row itself: a stored cost means a price
+ * applied at the plan's frozen instant, and nothing here converts it
+ * or reads an absent price as free. A candidate with no stored cost
+ * reports the price as unknown.
+ */
+export type ProjectTaskAiOptionWithResource =
+  ProjectTaskAiOptionRow & {
+    display_name: string;
+    provider_name: string | null;
+    model_name: string | null;
+    resource_source: ResourceSource;
+    registration_state: ResourceRegistrationState;
+    channel: AiResourceChannel;
+    entitlement: ResourceEntitlementState;
+    availability: ResourceAvailabilityState;
+    pricing_state: ResourcePricingState;
+    capability_state: ResourceCapabilityState;
+  };
+
+export function listProjectTaskAiOptionsWithState(
+  projectTaskId: string
+): ProjectTaskAiOptionWithResource[] {
+  const registryModels = new Map<
+    string,
+    RegistryModel
+  >();
+
+  for (const provider of listAiRegistry()) {
+    for (const model of provider.models) {
+      registryModels.set(model.id, model);
+    }
+  }
+
+  const resourcesByModelId = new Map<
+    string,
+    AiResourceRow
+  >();
+
+  for (const resource of listAiResources({
+    status: "active",
+  })) {
+    if (!resourcesByModelId.has(resource.model_id)) {
+      resourcesByModelId.set(
+        resource.model_id,
+        resource
+      );
+    }
+  }
+
+  /*
+   * Deliberate boundary, not a leftover condition. Declared resources
+   * are not part of the candidate pool yet, so no stored option refers
+   * to one, and this view derives state from the registry and the
+   * active ai_resources alone. A row that ever did refer to a declared
+   * resource would be mislabelled here: with no registry model and no
+   * registration behind it, deriveModelState would report it as a
+   * registry model that is merely not registered, under an empty
+   * display name. Such rows are therefore withheld rather than
+   * mislabelled. Entering the candidate pool is a separate change and
+   * replaces this guard with a declared branch in deriveModelState.
+   */
+  return listProjectTaskAiOptions(projectTaskId)
+    .filter((row) => row.declared_resource_id === null)
+    .map((row) => {
+      const state = deriveModelState(
+        row.model_id === null
+          ? undefined
+          : registryModels.get(row.model_id),
+        row.model_id === null
+          ? undefined
+          : resourcesByModelId.get(row.model_id)
+      );
+
+      const storedPrice =
+        row.cost_min_micros !== null &&
+        row.cost_max_micros !== null &&
+        row.cost_currency !== null;
+
+      const pricingState: ResourcePricingState =
+        storedPrice ? "known" : "unknown";
+
+      return {
+        ...row,
+        display_name: state.displayName,
+        provider_name: state.providerName,
+        model_name: state.modelName,
+        resource_source: state.source,
+        registration_state: state.registrationState,
+        channel: state.channel,
+        entitlement: state.entitlement,
+        availability: state.availability,
+        capability_state: state.capabilityState,
+        pricing_state: pricingState,
+      };
+    });
 }
 
 /*

@@ -10,16 +10,21 @@ import {
  * GET /api/planner/tasks/[id]/ai-options returns it.
  *
  * The shape is copied from the response on purpose and nothing is
- * added to it. There is no provider, no model display name, no score,
- * no rank and no recommendation in the payload, so this component
- * shows none of them. The model is shown as the raw model_id it was
- * stored with, and nothing tries to parse that id into anything
- * prettier, because a derived name would be a fact the API never sent.
+ * added to it. The stored fields are snake_case; the state fields
+ * beside them are the API's description of what this candidate refers
+ * to now (source, registration, channel, entitlement, availability,
+ * pricing, capabilities, display name), read from the inventories at
+ * request time rather than from the row.
+ *
+ * There is no score, no rank and no recommendation in the payload, so
+ * this component shows none of them. A model with no display name
+ * falls back to the raw model_id it was stored with, because a name
+ * the API never sent would be an invented fact.
  */
 type ProjectTaskAiOption = {
   id: string;
   project_task_id: string;
-  model_id: string;
+  model_id: string | null;
   tool_id: string | null;
   is_selected: number;
   cost_min_micros: number | null;
@@ -33,6 +38,20 @@ type ProjectTaskAiOption = {
   rationale: string | null;
   created_at: string;
   updated_at: string;
+  display_name: string;
+  provider_name: string | null;
+  model_name: string | null;
+  resource_source: "registered" | "registry";
+  registration_state: "registered" | "not_registered";
+  channel: "own_api" | "gateway" | "web_only" | "unknown";
+  entitlement: "free" | "paid" | "unknown";
+  availability:
+    | "callable"
+    | "needs_configuration"
+    | "external"
+    | "unknown";
+  pricing_state: "known" | "unknown";
+  capability_state: "known" | "unknown";
 };
 
 /*
@@ -60,6 +79,196 @@ const FIT_LABELS: Record<string, string> = {
 
 const FIT_HINT =
   "Reflects the task's declared capability requirements.";
+
+/*
+ * State labels. Each one says what the app holds about a resource,
+ * never how good it is. Nothing here is comparative: no option is
+ * called better, cheaper to pick or preferred, and an unknown stays
+ * unknown instead of being shown as a zero, a negative or a default.
+ */
+const SOURCE_LABELS: Record<string, string> = {
+  registered: "Registered resource",
+  registry: "Registry model",
+};
+
+const REGISTRATION_LABELS: Record<string, string> = {
+  registered: "Active registration held",
+  not_registered: "No active registration",
+};
+
+const CHANNEL_LABELS: Record<string, string> = {
+  own_api: "Own API key",
+  gateway: "Gateway",
+  web_only: "Web only",
+  unknown: "Channel unknown",
+};
+
+const ENTITLEMENT_LABELS: Record<string, string> = {
+  free: "Free entitlement",
+  paid: "Paid entitlement",
+  unknown: "Entitlement unknown",
+};
+
+const AVAILABILITY_LABELS: Record<string, string> = {
+  callable: "Callable",
+  needs_configuration: "Needs configuration",
+  external: "Used outside this app",
+  unknown: "Availability unknown",
+};
+
+const CAPABILITY_LABELS: Record<string, string> = {
+  known: "Capabilities stated",
+  unknown: "Capabilities unknown",
+};
+
+/*
+ * Pricing is a fact about this app's own rate card at the plan's
+ * frozen instant. A model with no recorded rate is reported as
+ * unknown, never as free.
+ */
+function pricingLabel(
+  option: ProjectTaskAiOption
+): string {
+  return option.pricing_state === "known"
+    ? "Price recorded"
+    : "Price unknown";
+}
+
+const STATE_CHIP_STYLE = {
+  display: "inline-block",
+  padding: "3px 8px",
+  marginRight: 5,
+  marginBottom: 4,
+  borderRadius: 5,
+  fontSize: 11,
+  fontWeight: 600,
+  color: "#334155",
+  background: "#eef1f6",
+} as const;
+
+const STATE_UNKNOWN_CHIP_STYLE = {
+  ...STATE_CHIP_STYLE,
+  color: "#666",
+  background: "#f4f4f5",
+} as const;
+
+function StateChip({
+  label,
+  known,
+}: {
+  label: string;
+  known: boolean;
+}) {
+  return (
+    <span
+      style={
+        known ? STATE_CHIP_STYLE : STATE_UNKNOWN_CHIP_STYLE
+      }
+    >
+      {label}
+    </span>
+  );
+}
+
+/*
+ * What this candidate refers to, as read now. Six independent facts
+ * laid side by side: they are never combined into one judgement, and
+ * nothing here adds them up or weighs them against each other.
+ */
+function ResourceState({
+  option,
+}: {
+  option: ProjectTaskAiOption;
+}) {
+  return (
+    <div
+      aria-label="Resource state"
+      style={{ marginTop: 12 }}
+    >
+      <div style={LABEL_STYLE}>RESOURCE</div>
+
+      <div>
+        <StateChip
+          label={
+            SOURCE_LABELS[option.resource_source] ??
+            option.resource_source
+          }
+          known
+        />
+
+        <StateChip
+          label={
+            REGISTRATION_LABELS[
+              option.registration_state
+            ] ?? option.registration_state
+          }
+          known={option.registration_state === "registered"}
+        />
+
+        <StateChip
+          label={
+            CHANNEL_LABELS[option.channel] ??
+            option.channel
+          }
+          known={option.channel !== "unknown"}
+        />
+
+        <StateChip
+          label={
+            ENTITLEMENT_LABELS[option.entitlement] ??
+            option.entitlement
+          }
+          known={option.entitlement !== "unknown"}
+        />
+
+        <StateChip
+          label={
+            AVAILABILITY_LABELS[option.availability] ??
+            option.availability
+          }
+          known={option.availability !== "unknown"}
+        />
+
+        <StateChip
+          label={pricingLabel(option)}
+          known={option.pricing_state === "known"}
+        />
+
+        <StateChip
+          label={
+            CAPABILITY_LABELS[option.capability_state] ??
+            option.capability_state
+          }
+          known={option.capability_state === "known"}
+        />
+      </div>
+
+      <div style={HINT_TEXT_STYLE}>
+        Read from your current registrations and the
+        registry.
+      </div>
+    </div>
+  );
+}
+
+/*
+ * The name to show: the display name the API sent, falling back to
+ * the stored identifier when there is none. The hint carries the
+ * provider for a registry model.
+ */
+function describeModel(option: ProjectTaskAiOption): {
+  value: string;
+  hint?: string;
+} {
+  const value =
+    option.display_name !== ""
+      ? option.display_name
+      : (option.model_id ?? "Unknown resource");
+
+  const hint = option.provider_name ?? "";
+
+  return hint === "" ? { value } : { value, hint };
+}
 
 /*
  * The three preference plan strategies are the only plans whose steps
@@ -420,10 +629,10 @@ export default function TaskAiOptions({
   /*
    * Replaces this planned step's candidate set with the generated
    * batch. There is no body: the service decides from the task, the
-   * plan's frozen basis, the registry and the user's active
-   * resources. On success the list is read again rather than patched,
-   * because the response carries the whole set and only the server
-   * knows the storage order.
+   * plan's frozen basis, the AI Registry and the user's active
+   * registrations. On success the list
+   * is read again rather than patched, because the response carries
+   * the whole set and only the server knows the storage order.
    *
    * Nothing here chooses on the user's behalf. Regeneration resets
    * every row to is_selected = 0, so selection stays a separate,
@@ -601,6 +810,7 @@ export default function TaskAiOptions({
               */}
               {options.map((option) => {
                 const cost = formatCost(option);
+                const model = describeModel(option);
                 const selected =
                   option.is_selected === 1;
                 const busy =
@@ -627,7 +837,8 @@ export default function TaskAiOptions({
                     >
                       <Detail
                         label="MODEL"
-                        value={option.model_id}
+                        value={model.value}
+                        hint={model.hint}
                       />
 
                       <Detail
@@ -651,6 +862,8 @@ export default function TaskAiOptions({
                         hint={FIT_HINT}
                       />
                     </div>
+
+                    <ResourceState option={option} />
 
                     <div
                       style={{

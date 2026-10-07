@@ -10,11 +10,11 @@ import {
 } from "@/lib/planner-api-errors";
 import {
   getProjectTask,
-  listProjectTaskAiOptions,
 } from "@/lib/repositories/planner-repository";
 import {
   createProjectTaskAiOption,
   FIT_STATUSES,
+  listProjectTaskAiOptionsWithState,
   PlannerServiceError,
 } from "@/lib/services/planner-service";
 
@@ -135,6 +135,12 @@ export async function POST(
  * order. That order is not a ranking: nothing compares cost, time or
  * fit_status to decide it, and no option is presented as better than
  * another.
+ *
+ * Each item carries the stored row plus the current state of what it
+ * refers to (source, registration, channel, entitlement, availability,
+ * pricing, capabilities, display name). That state is read from the
+ * inventories now, not from the row, so a registration archived since
+ * generation is reported as no longer held instead of as a stale claim.
  */
 export async function GET(
   _request: Request,
@@ -156,9 +162,7 @@ export async function GET(
 
     return NextResponse.json({
       ok: true,
-      items: listProjectTaskAiOptions(
-        id
-      ),
+      items: listProjectTaskAiOptionsWithState(id),
     });
   } catch (error) {
     return plannerServerErrorResponse(

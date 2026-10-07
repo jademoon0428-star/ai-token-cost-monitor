@@ -4,8 +4,8 @@
  * A pure composition layer. It owns no estimation logic of its own:
  * capability fit comes from fit-estimator, money from cost-estimator,
  * minutes from time-estimator, and ordering from strategy-rules. This
- * module only decides which models get looked at and stitches the four
- * answers into one record per model.
+ * module only decides which resources get looked at and stitches the
+ * four answers into one record per resource.
  *
  * It performs no database read and no database write, opens no file,
  * makes no network call, never reads the current time, never calls a
@@ -13,17 +13,22 @@
  * argument. The same arguments always produce the same output, byte for
  * byte.
  *
- * Models come from the existing AI Registry and nowhere else. There is
- * no second model list anywhere in this file. The caller supplies
- * whatever the registry already holds, typically by flattening
- * listAiRegistry(), and this generator treats it as read-only data.
+ * The thing to look at is an entry of the AI Resource Universe, which
+ * is the registry plus the user's active registered resources,
+ * assembled by lib/planner/resource-universe. The caller supplies that
+ * list. When a caller supplies only the plain registry model list it
+ * used to supply, each model is lifted into the same shape first, so
+ * there is still exactly one candidate path in this file and no second
+ * model list has appeared anywhere.
  *
  * The single most important behaviour here is what it does NOT do: it
  * does not filter. A model with no pricing stays in the result with a
  * null cost. A model with an unrecorded capability stays in with an
- * unknown fit. Neither is quietly dropped to make the list look
- * tidier, and neither is turned into a zero. An absent fact is
- * reported as an absent fact, all the way through to the caller.
+ * unknown fit. A resource this app cannot reach stays in with an
+ * availability of "external" or "unknown". None is quietly dropped to
+ * make the list look tidier, and none is turned into a zero. An absent
+ * fact is reported as an absent fact, all the way through to the
+ * caller.
  */
 import type {
   RegistryModel,
@@ -33,13 +38,25 @@ import type {
   FitStatus,
   ProjectPreference,
 } from "@/lib/repositories/planner-repository";
+import type {
+  AiResourceChannel,
+} from "@/lib/repositories/ai-resource-repository";
+import type {
+  ResourceAvailabilityState,
+  ResourceCapabilityState,
+  ResourceEntitlementState,
+  ResourcePricingState,
+  ResourceRegistrationState,
+  ResourceSource,
+  ResourceUniverseEntry,
+} from "@/lib/planner/resource-universe";
+import { buildRegistryEntry } from "@/lib/planner/resource-universe";
 import {
   estimatePlannerCost,
   type PlannerCostEstimate,
 } from "@/lib/planner/cost-estimator";
 import {
   estimatePlannerFit,
-  type PlannerCapabilityFacts,
   type PlannerFitEstimate,
 } from "@/lib/planner/fit-estimator";
 import {
@@ -79,12 +96,23 @@ export type PlannerPricingResolver = (
 ) => RegistryPricingRow | null;
 
 /*
- * One model considered for one planned step.
+ * One resource considered for one planned step.
  *
  * Every measurement here is nullable on purpose. `fitStatus`,
  * `costMinMicros`, `costMaxMicros`, `costCurrency`, `timeMinMinutes`
  * and `timeMaxMinutes` all carry an explicit unknown as null. None of
  * them has a numeric default.
+ *
+ * The reference side is nullable the same way and for the same reason:
+ * `modelId` names the registry model this candidate is about, and it
+ * stays nullable only because the stored column is. Every candidate
+ * this generator builds carries a registry model.
+ *
+ * `resourceSource` and the five state fields say where the resource
+ * came from and what is currently known about it. They are provenance
+ * and facts, not judgement: a source never implies better or worse,
+ * and every one of them has an explicit unknown arm that is taken
+ * rather than guessed.
  *
  * `isStrategyRepresentative` records that strategy-rules surfaced this
  * candidate as one of the distinct cost or time positions worth
@@ -93,10 +121,18 @@ export type PlannerPricingResolver = (
  * persists nothing and changes no stored selection.
  */
 export type PlannerCandidate = {
-  modelId: string;
-  providerId: string;
-  providerName: string;
-  modelName: string;
+  modelId: string | null;
+  resourceSource: ResourceSource;
+  registrationState: ResourceRegistrationState;
+  channel: AiResourceChannel;
+  entitlement: ResourceEntitlementState;
+  availability: ResourceAvailabilityState;
+  pricingState: ResourcePricingState;
+  capabilityState: ResourceCapabilityState;
+  providerId: string | null;
+  providerName: string | null;
+  modelName: string | null;
+  displayName: string;
   toolId: null;
   fitStatus: FitStatus;
   fitReason: string;
@@ -141,31 +177,6 @@ function resolvePricingAt(
   );
 
   return match ?? null;
-}
-
-/*
- * RegistryModel.capabilities is already the tri-state shape the fit
- * estimator wants. A model with no capability row at all becomes null,
- * which the fit estimator reads as "nothing is known", not "nothing is
- * required".
- */
-function toCapabilityFacts(
-  model: RegistryModel
-): PlannerCapabilityFacts | null {
-  const capabilities = model.capabilities;
-
-  if (capabilities === null) {
-    return null;
-  }
-
-  return {
-    supports_tools: capabilities.supports_tools,
-    supports_vision: capabilities.supports_vision,
-    supports_reasoning: capabilities.supports_reasoning,
-    context_window_tokens:
-      capabilities.context_window_tokens,
-    max_output_tokens: capabilities.max_output_tokens,
-  };
 }
 
 /*
@@ -259,19 +270,28 @@ function buildRationale(
 }
 
 /*
- * Generates one candidate per registered model for one planned step.
+ * Generates one candidate per resource for one planned step.
  *
- * `models` is whatever the AI Registry already holds. `planCreatedAt`
- * is frozen once here and used for every model, so every candidate in
- * a plan is priced at the same instant and the whole set is internally
- * consistent. Passing the current time is the caller's decision to
- * make, not this function's; it never looks one up.
+ * `universe` carries everything worth showing for this plan: registry
+ * models and the user's active registered resources, in one list. It
+ * is optional only so the plain `models` shape the earlier phases
+ * supplied keeps working; when it is absent, every supplied model is
+ * lifted into the same entry shape first, so both inputs run through a
+ * single candidate path and produce the same output for the same
+ * facts.
+ *
+ * `planCreatedAt` is frozen once here and used for every resource, so
+ * every candidate in a plan is priced at the same instant and the whole
+ * set is internally consistent. Passing the current time is the
+ * caller's decision to make, not this function's; it never looks one
+ * up.
  */
 export function generatePlannerCandidates(input: {
   task: PlannerCandidateTask;
   planCreatedAt: string;
   strategy: ProjectPreference;
   models: ReadonlyArray<RegistryModel>;
+  universe?: ReadonlyArray<ResourceUniverseEntry>;
   pricingResolver?: PlannerPricingResolver;
 }): PlannerCandidateGenerationResult {
   const {
@@ -279,15 +299,40 @@ export function generatePlannerCandidates(input: {
     planCreatedAt,
     strategy,
     models,
+    universe,
     pricingResolver,
   } = input;
+
+  const entries: ResourceUniverseEntry[] =
+    universe === undefined
+      ? models.map(buildRegistryEntry)
+      : [...universe];
+
+  /*
+   * The default resolver only ever sees registry models. The lookup
+   * covers both the supplied model list and whatever the universe
+   * already carries, so handing over a universe without repeating the
+   * model list still resolves the same rates.
+   */
+  const modelsById = new Map<string, RegistryModel>();
+
+  for (const model of models) {
+    modelsById.set(model.id, model);
+  }
+
+  for (const entry of entries) {
+    if (entry.registryModel !== null) {
+      modelsById.set(
+        entry.registryModel.id,
+        entry.registryModel
+      );
+    }
+  }
 
   const resolvePricing: PlannerPricingResolver =
     pricingResolver ??
     ((modelId, at) => {
-      const model = models.find(
-        (entry) => entry.id === modelId
-      );
+      const model = modelsById.get(modelId);
 
       return model === undefined
         ? null
@@ -295,8 +340,8 @@ export function generatePlannerCandidates(input: {
     });
 
   /*
-   * Time is a property of the step, not of the model. It is computed
-   * once and shared, so a model with no speed data cannot be given a
+   * Time is a property of the step, not of the resource. It is computed
+   * once and shared, so a resource with no speed data cannot be given a
    * different number here.
    */
   const time = estimatePlannerTime({
@@ -304,7 +349,7 @@ export function generatePlannerCandidates(input: {
     complexity: task.complexity,
   });
 
-  const built = models.map((model) => {
+  const built = entries.map((entry) => {
     const fit = estimatePlannerFit({
       requiredCapabilitiesJson:
         task.required_capabilities,
@@ -312,13 +357,13 @@ export function generatePlannerCandidates(input: {
         task.estimated_input_tokens_max,
       estimatedOutputTokensMax:
         task.estimated_output_tokens_max,
-      capabilities: toCapabilityFacts(model),
+      capabilities: entry.capabilities,
     });
 
-    const pricingRow = resolvePricing(
-      model.id,
-      planCreatedAt
-    );
+    const pricingRow =
+      entry.modelId === null
+        ? null
+        : resolvePricing(entry.modelId, planCreatedAt);
 
     const cost = estimatePlannerCost({
       task: {
@@ -336,28 +381,47 @@ export function generatePlannerCandidates(input: {
           ? null
           : toCostPricing(pricingRow),
       planCreatedAt,
-      modelId: model.id,
+      modelId: entry.modelId,
     });
 
+    /*
+     * The pricing state of this candidate, as opposed to the one the
+     * universe records. It is the estimate that decides: a rate exists
+     * only if a figure came out at the plan's frozen instant, and "no
+     * rate covers this instant" is an unknown, never a free.
+     */
+    const costIsKnown =
+      cost.costMinMicros !== null &&
+      cost.costMaxMicros !== null;
+
+    const pricingState: ResourcePricingState =
+      costIsKnown ? "known" : "unknown";
+
+    const pricingBasis = cost.pricingBasis;
+
     return {
-      model,
+      entry,
       fit,
       cost,
       time,
+      pricingState,
+      pricingBasis,
       rationale: buildRationale(fit, cost, time),
     };
   });
 
   /*
    * The shape strategy-rules already understands. Feeding it the real
-   * estimates means no ordering rule is reimplemented here.
+   * estimates means no ordering rule is reimplemented here. The id it
+   * carries is a resource key; strategy-rules treats it as an opaque
+   * label and hands it straight back.
    */
   const strategyCandidates: PlannerStrategyCandidate[] =
-    built.map((entry) => ({
-      modelId: entry.model.id,
-      fitStatus: entry.fit.fitStatus,
-      cost: entry.cost,
-      time: entry.time,
+    built.map((item) => ({
+      modelId: item.entry.key,
+      fitStatus: item.fit.fitStatus,
+      cost: item.cost,
+      time: item.time,
     }));
 
   const strategyResult = applyPlannerStrategy({
@@ -365,52 +429,60 @@ export function generatePlannerCandidates(input: {
     candidates: strategyCandidates,
   });
 
-  const representativeIds = new Set(
+  const representativeKeys = new Set(
     strategyResult.representatives.map(
       (entry) => entry.modelId
     )
   );
 
-  const byModelId = new Map(
-    built.map((entry) => [
-      entry.model.id,
-      entry,
-    ])
+  const byKey = new Map(
+    built.map((item) => [item.entry.key, item])
   );
 
   const candidates: PlannerCandidate[] =
     strategyResult.order.map((ordered) => {
-      const entry = byModelId.get(ordered.modelId);
+      const item = byKey.get(ordered.modelId);
 
-      if (entry === undefined) {
+      if (item === undefined) {
         throw new Error(
-          `strategy-rules returned an unknown model id: ${ordered.modelId}`
+          `strategy-rules returned an unknown resource key: ${ordered.modelId}`
         );
       }
 
+      const entry = item.entry;
+
       return {
-        modelId: entry.model.id,
-        providerId: entry.model.provider_id,
-        providerName: entry.model.provider_name,
-        modelName: entry.model.name,
+        modelId: entry.modelId,
+        resourceSource: entry.source,
+        registrationState: entry.registrationState,
+        channel: entry.channel,
+        entitlement: entry.entitlement,
+        availability: entry.availability,
+        pricingState: item.pricingState,
+        capabilityState: entry.capabilityState,
+        providerId: entry.providerId,
+        providerName: entry.providerName,
+        modelName: entry.modelName,
+        displayName: entry.displayName,
         /*
          * Fixed for this phase. user_ai_tools has no real inventory
          * and no input path, so the tool dimension stays empty rather
          * than being invented or auto-bound.
          */
         toolId: null,
-        fitStatus: entry.fit.fitStatus,
-        fitReason: entry.fit.reason,
-        costMinMicros: entry.cost.costMinMicros,
-        costMaxMicros: entry.cost.costMaxMicros,
-        costCurrency: entry.cost.currency,
-        pricingBasis: entry.cost.pricingBasis,
-        timeMinMinutes: entry.time.minMinutes,
-        timeMaxMinutes: entry.time.maxMinutes,
-        timeBasis: entry.time.basis,
-        rationale: entry.rationale,
-        isStrategyRepresentative:
-          representativeIds.has(entry.model.id),
+        fitStatus: item.fit.fitStatus,
+        fitReason: item.fit.reason,
+        costMinMicros: item.cost.costMinMicros,
+        costMaxMicros: item.cost.costMaxMicros,
+        costCurrency: item.cost.currency,
+        pricingBasis: item.pricingBasis,
+        timeMinMinutes: item.time.minMinutes,
+        timeMaxMinutes: item.time.maxMinutes,
+        timeBasis: item.time.basis,
+        rationale: item.rationale,
+        isStrategyRepresentative: representativeKeys.has(
+          entry.key
+        ),
       };
     });
 
