@@ -618,3 +618,93 @@ export function setUserAiToolStatus(
     )
     .run(status, updatedAt, id);
 }
+
+export type RegistryBaselineResult = {
+  checked: boolean;
+  seeded: boolean;
+};
+
+/*
+ * Runtime baseline for the AI Registry.
+ *
+ * A fresh install used to arrive with an empty models table, so every
+ * AI option list, every combination plan and every cost estimate came
+ * back empty until someone ran scripts/seed-ai-registry.mjs by hand.
+ * This seeds the same manifest once, from the server's own startup,
+ * so the registry facts exist without a manual step.
+ *
+ * Deliberately NOT called from initDb() or listAiRegistry():
+ *
+ * - initDb() runs inside every smoke script against a throwaway temp
+ *   database, and seeding there would make the temp databases differ
+ *   from the fixtures those scripts carefully build.
+ * - listAiRegistry() is a read. A read that writes would make a
+ *   query mutate the database it just answered from.
+ *
+ * Instead it is called once from instrumentation's register(), which
+ * runs in the Node server at startup and never inside a build, a smoke
+ * script or the edge runtime. It is idempotent (INSERT OR IGNORE all
+ * round), memoized for the process, and it never throws: a registry
+ * that cannot be seeded must not stop the server from starting, it
+ * only leaves the empty baseline that the scripts can still fill.
+ *
+ * The sentinel counts cover all three things this manifest provides -
+ * models, capability rows and rate rows - because a database with
+ * models but no prices is not a baseline anybody wants overwritten
+ * quietly, and a database with none of the three is one that has never
+ * been seeded.
+ */
+let baselineChecked = false;
+
+export function ensureAiRegistryBaseline(): RegistryBaselineResult {
+  if (baselineChecked) {
+    return { checked: true, seeded: false };
+  }
+
+  if (process.env.NEXT_RUNTIME !== "nodejs") {
+    return { checked: false, seeded: false };
+  }
+
+  if (
+    process.env.NEXT_PHASE === "phase-production-build"
+  ) {
+    return { checked: false, seeded: false };
+  }
+
+  try {
+    initDb();
+
+    const counts = getDb()
+      .prepare(
+        `
+          SELECT
+            (SELECT COUNT(*) FROM models) AS models,
+            (SELECT COUNT(*) FROM ai_model_capabilities) AS capabilities,
+            (SELECT COUNT(*) FROM pricing_versions) AS pricing
+        `
+      )
+      .get() as {
+      models: number;
+      capabilities: number;
+      pricing: number;
+    };
+
+    if (
+      counts.models > 0 &&
+      counts.capabilities > 0 &&
+      counts.pricing > 0
+    ) {
+      baselineChecked = true;
+
+      return { checked: true, seeded: false };
+    }
+
+    seedAiRegistry();
+
+    baselineChecked = true;
+
+    return { checked: true, seeded: true };
+  } catch {
+    return { checked: false, seeded: false };
+  }
+}
