@@ -30,6 +30,7 @@ const NOT_FOUND_CODES: ReadonlySet<string> = new Set([
   "PROJECT_TASK_NOT_FOUND",
   "AI_OPTION_NOT_FOUND",
   "AI_RESOURCE_NOT_FOUND",
+  "STAGE_NOT_FOUND",
   "TASK_NOT_FOUND",
   "MODEL_NOT_FOUND",
   "TOOL_NOT_FOUND",
@@ -45,6 +46,13 @@ const NOT_FOUND_CODES: ReadonlySet<string> = new Set([
 const CONFLICT_CODES: ReadonlySet<string> = new Set([
   "INVALID_STATUS_TRANSITION",
   "DUPLICATE_AI_RESOURCE",
+  /*
+   * A stage that planned steps still point at cannot be physically
+   * deleted; the service refuses and the caller is told to archive
+   * instead. The current state of the row conflicts with the
+   * request, so it is a 409, not a 400.
+   */
+  "STAGE_HAS_TASKS",
 ]);
 
 export function plannerErrorStatus(

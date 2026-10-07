@@ -10,6 +10,8 @@ import {
   useState,
 } from "react";
 
+import ProjectStages from "@/components/planner/project-stages";
+
 type ProjectRow = {
   id: string;
   name: string;
@@ -674,6 +676,8 @@ export default function ProjectDetailPage() {
               value={formatDate(project.created_at)}
             />
           </div>
+
+          <ProjectStages projectId={projectId} />
 
           <div
             style={{

@@ -2,21 +2,29 @@ import { randomUUID } from "node:crypto";
 
 import { getDb } from "@/lib/db";
 import {
+  archiveProjectStage as archiveProjectStageInDb,
+  countProjectStageTasks,
   createProject as createProjectInDb,
   createProjectPlan as createProjectPlanInDb,
+  createProjectStage as createProjectStageInDb,
   createProjectTask as createProjectTaskInDb,
   createProjectTaskAiOption as createProjectTaskAiOptionInDb,
+  deleteProjectStage as deleteProjectStageInDb,
   getProject,
   getProjectPlan,
+  getProjectStageById as getProjectStageByIdInDb,
+  getProjectStages as getProjectStagesInDb,
   getProjectTask,
   getProjectTaskAiOption,
   linkProjectTaskToExecutionTask as linkInDb,
   listProjectTaskAiOptions,
   nextProjectPlanVersion,
+  nextProjectStageSequence,
   nextProjectTaskSequence,
   replaceProjectTaskAiOptions,
   selectProjectTaskAiOption as selectInDb,
   updateProject as updateProjectInDb,
+  updateProjectStage as updateProjectStageInDb,
   updateProjectStatus as updateProjectStatusInDb,
   updateProjectTask as updateProjectTaskInDb,
   updateProjectTaskStatus as updateProjectTaskStatusInDb,
@@ -24,6 +32,7 @@ import {
 import type {
   FitStatus,
   ProjectPreference,
+  ProjectStageRow,
   ProjectStatus,
   ProjectTaskAiOptionRow,
   ProjectTaskCategory,
@@ -358,6 +367,52 @@ function requireProjectTask(id: string): ProjectTaskRow {
   return projectTask;
 }
 
+function requireProjectStage(
+  id: string
+): ProjectStageRow {
+  const stage = getProjectStageByIdInDb(id);
+
+  if (!stage) {
+    fail(
+      "STAGE_NOT_FOUND",
+      `project stage "${id}" does not exist`
+    );
+  }
+
+  return stage;
+}
+
+/*
+ * M2-A: a task may only be grouped under a stage of its own
+ * project. The foreign key checks that the stage exists and
+ * nothing else, so this service rule is the only thing stopping
+ * Project A's task from being bound to Project B's stage.
+ *
+ * null means "no stage" (unbind) and passes through without a
+ * lookup. A stage of any status may be bound: archived means
+ * "finished phase", not "forbidden target", and refusing it would
+ * silently break historical grouping.
+ */
+function requireStageForProject(
+  stageId: string | null,
+  projectId: string
+): string | null {
+  if (stageId === null) {
+    return null;
+  }
+
+  const stage = requireProjectStage(stageId);
+
+  if (stage.project_id !== projectId) {
+    fail(
+      "STAGE_PROJECT_MISMATCH",
+      `stage "${stage.name}" belongs to a different project`
+    );
+  }
+
+  return stage.id;
+}
+
 function requireOption(
   id: string
 ): ProjectTaskAiOptionRow {
@@ -666,6 +721,179 @@ export function updateProjectStatus(
 }
 
 /*
+ * M1 stage layer (PLANNER_STAGE_AND_TASK_MODEL_DESIGN.md).
+ *
+ * Stages belong to the project, not to a plan: every plan version
+ * and every generated combination plan of the project shares one
+ * set of stages, so nothing here is scoped to a plan.
+ *
+ * Two business rules live in this section and nowhere else:
+ *
+ * 1. The sequence is decided by the service, never by the caller,
+ *    which is what keeps UNIQUE(project_id, sequence) satisfied.
+ * 2. A stage that still has planned steps pointing at it is
+ *    archived, never deleted. countProjectStageTasks supplies the
+ *    fact; this layer decides what the fact means.
+ *
+ * There is no estimate, no score and no progress calculation here:
+ * a stage carries no time, cost or completion figure of its own,
+ * and none is invented for it.
+ */
+
+/*
+ * Creates the next stage of a project.
+ *
+ * The sequence is decided here, never by the caller: it is one more
+ * than the highest sequence the project already has. A caller that
+ * passes a sequence anyway has it ignored.
+ */
+export function createProjectStage(input: {
+  projectId: string;
+  name: string;
+  description?: string | null;
+}): ReturnType<typeof getProjectStageByIdInDb> {
+  requireProject(input.projectId);
+
+  const name = requiredText(
+    input.name,
+    "project stage name"
+  );
+
+  const sequence = nextProjectStageSequence(
+    input.projectId
+  );
+
+  const id = randomUUID();
+
+  createProjectStageInDb({
+    id,
+    projectId: input.projectId,
+    name,
+    description: optionalText(
+      input.description,
+      "description"
+    ),
+    sequence,
+    createdAt: new Date().toISOString(),
+  });
+
+  return getProjectStageByIdInDb(id);
+}
+
+/*
+ * All stages of a project in their planned order. Archived stages
+ * are included: archiving hides nothing from a reader that asked
+ * for the project's structure, and the status column says which is
+ * which.
+ */
+export function getProjectStages(
+  projectId: string
+): ProjectStageRow[] {
+  requireProject(projectId);
+
+  return getProjectStagesInDb(projectId);
+}
+
+/*
+ * Renames, re-describes or reorders a stage.
+ *
+ * sequence is accepted here (unlike task sequences) because
+ * reordering stages is a legal structural change; it must be a
+ * whole number of 1 or more. A sequence that collides with another
+ * stage of the same project is refused by UNIQUE(project_id,
+ * sequence) at the database level - this service never shuffles
+ * other rows behind the caller's back.
+ */
+export function updateProjectStage(
+  id: string,
+  input: {
+    name?: string;
+    description?: string | null;
+    sequence?: number;
+  }
+): ReturnType<typeof getProjectStageByIdInDb> {
+  requireProjectStage(id);
+
+  const update: Parameters<
+    typeof updateProjectStageInDb
+  >[1] = {
+    updatedAt: new Date().toISOString(),
+  };
+
+  if (input.name !== undefined) {
+    update.name = requiredText(
+      input.name,
+      "project stage name"
+    );
+  }
+
+  if (input.description !== undefined) {
+    update.description = optionalText(
+      input.description,
+      "description"
+    );
+  }
+
+  if (input.sequence !== undefined) {
+    if (
+      !Number.isInteger(input.sequence) ||
+      input.sequence < 1
+    ) {
+      fail(
+        "INVALID_NUMBER",
+        `sequence must be a whole number of 1 or more, got ${input.sequence}`
+      );
+    }
+
+    update.sequence = input.sequence;
+  }
+
+  updateProjectStageInDb(id, update);
+
+  return getProjectStageByIdInDb(id);
+}
+
+/*
+ * The dedicated structural operation: a stage is archived, never
+ * deleted by status change, and archiving is always allowed
+ * regardless of how many tasks reference the stage.
+ */
+export function archiveProjectStage(
+  id: string
+): ReturnType<typeof getProjectStageByIdInDb> {
+  requireProjectStage(id);
+
+  archiveProjectStageInDb(
+    id,
+    new Date().toISOString()
+  );
+
+  return getProjectStageByIdInDb(id);
+}
+
+/*
+ * Physical delete, refused while any planned step still points at
+ * the stage. This is decision 4 of
+ * PLANNER_STAGE_AND_TASK_MODEL_DESIGN.md: historical plans keep
+ * the grouping they were planned with, so a referenced stage can
+ * only be archived.
+ */
+export function deleteProjectStage(id: string): void {
+  const stage = requireProjectStage(id);
+
+  const referencingTasks = countProjectStageTasks(id);
+
+  if (referencingTasks > 0) {
+    fail(
+      "STAGE_HAS_TASKS",
+      `project stage "${stage.name}" is referenced by ${referencingTasks} planned step(s) and cannot be deleted; archive it instead`
+    );
+  }
+
+  deleteProjectStageInDb(id);
+}
+
+/*
  * Creates the next plan version for a project.
  *
  * The version is decided here, never by the caller: it is one more
@@ -718,6 +946,7 @@ export function createProjectPlan(input: {
 export function createProjectTask(input: {
   planId: string;
   taskId?: string | null;
+  stageId?: string | null;
   name: string;
   category: ProjectTaskCategory;
   complexity: ProjectTaskComplexity;
@@ -728,7 +957,7 @@ export function createProjectTask(input: {
   estimatedOutputTokensMin?: number | null;
   estimatedOutputTokensMax?: number | null;
 }): ReturnType<typeof getProjectTask> {
-  requirePlan(input.planId);
+  const plan = requirePlan(input.planId);
 
   const name = requiredText(input.name, "project task name");
 
@@ -768,10 +997,16 @@ export function createProjectTask(input: {
     input.planId
   );
 
+  const stageId = requireStageForProject(
+    input.stageId ?? null,
+    plan.project_id
+  );
+
   createProjectTaskInDb({
     id,
     planId: input.planId,
     taskId: assertTaskExists(input.taskId),
+    stageId,
     sequence,
     name,
     category: assertOneOf(
@@ -807,6 +1042,7 @@ export function createProjectTask(input: {
 export function updateProjectTask(
   id: string,
   input: {
+    stageId?: string | null;
     name?: string;
     category?: ProjectTaskCategory;
     complexity?: ProjectTaskComplexity;
@@ -818,11 +1054,27 @@ export function updateProjectTask(
     estimatedOutputTokensMax?: number | null;
   }
 ): ReturnType<typeof getProjectTask> {
-  requireProjectTask(id);
+  const task = requireProjectTask(id);
 
   const update: Parameters<typeof updateProjectTaskInDb>[1] = {
     updatedAt: new Date().toISOString(),
   };
+
+  /*
+   * Binding and unbinding. The key being present is what makes this
+   * a change: a body without stageId leaves the grouping alone, a
+   * string re-groups the step (same project only, see
+   * requireStageForProject), null clears it. The task's own project
+   * comes from task -> plan, because the task row has no project id.
+   */
+  if (input.stageId !== undefined) {
+    const plan = requirePlan(task.plan_id);
+
+    update.stageId = requireStageForProject(
+      input.stageId,
+      plan.project_id
+    );
+  }
 
   if (input.name !== undefined) {
     update.name = requiredText(input.name, "project task name");

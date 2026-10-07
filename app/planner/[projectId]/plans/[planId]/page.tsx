@@ -25,6 +25,7 @@ type ProjectTaskRow = {
   id: string;
   plan_id: string;
   task_id: string | null;
+  stage_id: string | null;
   sequence: number;
   name: string;
   category: string;
@@ -35,6 +36,25 @@ type ProjectTaskRow = {
   estimated_input_tokens_max: number | null;
   estimated_output_tokens_min: number | null;
   estimated_output_tokens_max: number | null;
+  status: string;
+  created_at: string;
+  updated_at: string;
+};
+
+/*
+ * One stage of the project as GET
+ * /api/planner/projects/[id]/stages returns it, in sequence order
+ * with both active and archived rows. The plan page only reads the
+ * id, the name and the status: archived stages stay in the
+ * dropdowns so a historical grouping remains visible and editable,
+ * with the status shown as a suffix on the label.
+ */
+type ProjectStageRow = {
+  id: string;
+  project_id: string;
+  name: string;
+  description: string | null;
+  sequence: number;
   status: string;
   created_at: string;
   updated_at: string;
@@ -251,6 +271,75 @@ function formatTokenTotal(evidence: VerifiedUsageEvidence): string {
   return String(total);
 }
 
+/*
+ * The display label of a task's grouping. A task without a stage is
+ * "No stage"; a task pointing at a stage that is not in the loaded
+ * list (for example because the stages request failed) says so
+ * instead of silently rendering nothing.
+ */
+function stageLabel(
+  stages: ProjectStageRow[],
+  stageId: string | null
+): string {
+  if (stageId === null) {
+    return "No stage";
+  }
+
+  return (
+    stages.find((stage) => stage.id === stageId)?.name ??
+    "Unknown stage"
+  );
+}
+
+/*
+ * One display group: a stage of this project, or the "No stage"
+ * bucket when stage_id is null. key is the stage id (or "none"),
+ * label comes from stageLabel so it always matches the badge shown
+ * on each card.
+ */
+type TaskStageGroup = {
+  key: string;
+  label: string;
+  tasks: ProjectTaskRow[];
+};
+
+/*
+ * Groups the plan's steps for display (M2-C). Pure derivation from
+ * the two arrays: one pass over tasks, so every group keeps the
+ * original task order and the groups themselves appear in the order
+ * their first member appears in the list - nothing is re-sorted and
+ * no stage is ever dropped, even when a stage_id is not in the
+ * loaded stages array (stageLabel renders that case as
+ * "Unknown stage").
+ */
+function groupTasksByStage(
+  tasks: ProjectTaskRow[],
+  stages: ProjectStageRow[]
+): TaskStageGroup[] {
+  const groups: TaskStageGroup[] = [];
+  const byKey = new Map<string, TaskStageGroup>();
+
+  for (const task of tasks) {
+    const key = task.stage_id ?? "none";
+    let group = byKey.get(key);
+
+    if (!group) {
+      group = {
+        key,
+        label: stageLabel(stages, task.stage_id),
+        tasks: [],
+      };
+
+      byKey.set(key, group);
+      groups.push(group);
+    }
+
+    group.tasks.push(task);
+  }
+
+  return groups;
+}
+
 function Field({
   label,
   value,
@@ -376,6 +465,7 @@ export default function PlanDetailPage() {
     null
   );
   const [tasks, setTasks] = useState<ProjectTaskRow[]>([]);
+  const [stages, setStages] = useState<ProjectStageRow[]>([]);
   const [assignments, setAssignments] = useState<
     PlanResourceAssignmentRow[]
   >([]);
@@ -416,6 +506,21 @@ export default function PlanDetailPage() {
   const [taskError, setTaskError] = useState<string | null>(
     null
   );
+
+  /*
+   * M2-B stage binding state. createStageId is the create form's
+   * dropdown, "" meaning No stage. The other two maps are per-task
+   * edit state: a row is locked while its PATCH is in flight, and a
+   * rejected change keeps its server message under that row so the
+   * select (still controlled by the stored task.stage_id) snaps back
+   * to what is actually persisted.
+   */
+  const [createStageId, setCreateStageId] = useState("");
+  const [pendingStageTaskIds, setPendingStageTaskIds] =
+    useState<Record<string, boolean>>({});
+  const [stageEditErrors, setStageEditErrors] = useState<
+    Record<string, string>
+  >({});
 
   /*
    * Which task panels are open, and which have been opened at least
@@ -462,6 +567,9 @@ export default function PlanDetailPage() {
       fetch(`/api/planner/projects/${projectId}`, {
         cache: "no-store",
       }).then(readJson),
+      fetch(`/api/planner/projects/${projectId}/stages`, {
+        cache: "no-store",
+      }).then(readJson),
       fetch(`/api/planner/plans/${planId}/tasks`, {
         cache: "no-store",
       }).then(readJson),
@@ -485,6 +593,7 @@ export default function PlanDetailPage() {
         ([
           planResult,
           projectResult,
+          stagesResult,
           tasksResult,
           assignmentsResult,
           productivityResult,
@@ -524,6 +633,22 @@ export default function PlanDetailPage() {
           ) {
             setProjectName(
               projectResult.data.project.name
+            );
+          }
+
+          /*
+           * The stage list only feeds the two dropdowns, so a failed
+           * stages request is not fatal to the page: the selects fall
+           * back to "No stage" alone and everything else still loads.
+           */
+          if (
+            stagesResult.response.ok &&
+            stagesResult.data?.ok &&
+            Array.isArray(stagesResult.data.items)
+          ) {
+            setStages(
+              stagesResult.data
+                .items as ProjectStageRow[]
             );
           }
 
@@ -631,6 +756,7 @@ export default function PlanDetailPage() {
     setName("");
     setCategory("coding");
     setComplexity("medium");
+    setCreateStageId("");
     setDescription("");
     setCapabilities("");
     setInputTokensMin("");
@@ -642,9 +768,12 @@ export default function PlanDetailPage() {
   /*
    * Only the fields on the endpoint whitelist are sent, and an
    * optional field the user left empty is omitted entirely rather
-   * than sent as an empty string. The task id, the sequence, the
-   * status and both timestamps are server-owned: sequence is one
-   * more than the plan's highest, and status starts as planned.
+   * than sent as an empty string. The one exception is stageId: it
+   * is always present, "" of the dropdown becoming an explicit null
+   * so "No stage" is a deliberate ungrouped value rather than an
+   * absent key. The task id, the sequence, the status and both
+   * timestamps are server-owned: sequence is one more than the plan's
+   * highest, and status starts as planned.
    */
   async function handleCreateTask(
     event: React.FormEvent<HTMLFormElement>
@@ -711,6 +840,7 @@ export default function PlanDetailPage() {
       name: name.trim(),
       category,
       complexity,
+      stageId: createStageId === "" ? null : createStageId,
     };
 
     if (description.trim() !== "") {
@@ -786,6 +916,87 @@ export default function PlanDetailPage() {
           : "Failed to add task"
       );
       setCreatingTask(false);
+    }
+  }
+
+  /*
+   * M2-B: one dropdown per planned step calls the existing PATCH
+   * endpoint with stageId as its only field. "" is No stage and is
+   * sent as an explicit null to unbind; a string re-groups the step
+   * under a stage of this project, and the service refuses a stage
+   * of another project (STAGE_PROJECT_MISMATCH) or a missing one
+   * (STAGE_NOT_FOUND), whose message lands in stageEditErrors for
+   * that row. The select stays controlled by the stored
+   * task.stage_id, so a rejected change snaps back to what is really
+   * persisted instead of showing a value the server never took.
+   */
+  async function handleStageChange(
+    taskId: string,
+    nextStageId: string
+  ) {
+    if (pendingStageTaskIds[taskId]) {
+      return;
+    }
+
+    setPendingStageTaskIds((current) => ({
+      ...current,
+      [taskId]: true,
+    }));
+    setStageEditErrors((current) => {
+      const next = { ...current };
+
+      delete next[taskId];
+
+      return next;
+    });
+
+    try {
+      const response = await fetch(
+        `/api/planner/tasks/${taskId}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            stageId:
+              nextStageId === "" ? null : nextStageId,
+          }),
+        }
+      );
+
+      const data = await response
+        .json()
+        .catch(() => null);
+
+      if (!response.ok || !data?.ok || !data?.task) {
+        throw new Error(
+          typeof data?.error === "string"
+            ? data.error
+            : `Failed to update stage (${response.status})`
+        );
+      }
+
+      const updated = data.task as ProjectTaskRow;
+
+      setTasks((current) =>
+        current.map((task) =>
+          task.id === taskId ? updated : task
+        )
+      );
+    } catch (cause) {
+      setStageEditErrors((current) => ({
+        ...current,
+        [taskId]:
+          cause instanceof Error
+            ? cause.message
+            : "Failed to update stage",
+      }));
+    } finally {
+      setPendingStageTaskIds((current) => ({
+        ...current,
+        [taskId]: false,
+      }));
     }
   }
 
@@ -1129,6 +1340,44 @@ export default function PlanDetailPage() {
 
                 <div>
                   <label
+                    htmlFor="taskStage"
+                    style={labelStyle}
+                  >
+                    Stage (optional)
+                  </label>
+
+                  <select
+                    id="taskStage"
+                    value={createStageId}
+                    onChange={(event) =>
+                      setCreateStageId(event.target.value)
+                    }
+                    style={inputStyle}
+                  >
+                    <option value="">No stage</option>
+                    {stages.map((stage) => (
+                      <option
+                        key={stage.id}
+                        value={stage.id}
+                      >
+                        {stage.status === "archived"
+                          ? `${stage.name} (Archived)`
+                          : stage.name}
+                      </option>
+                    ))}
+                  </select>
+
+                  {stages.length === 0 ? (
+                    <p style={hintStyle}>
+                      This project has no stages yet.
+                      Create one on the project page to
+                      group steps.
+                    </p>
+                  ) : null}
+                </div>
+
+                <div>
+                  <label
                     htmlFor="taskDescription"
                     style={labelStyle}
                   >
@@ -1388,119 +1637,248 @@ export default function PlanDetailPage() {
                   gap: 10,
                 }}
               >
-                {tasks.map((task) => (
+                {groupTasksByStage(tasks, stages).map((group) => (
                   <div
-                    key={task.id}
+                    key={group.key}
                     style={{
-                      paddingTop: 10,
-                      borderTop: "1px solid #f0f1f4",
+                      display: "grid",
+                      gap: 10,
                     }}
                   >
                     <div
                       style={{
                         display: "flex",
-                        justifyContent:
-                          "space-between",
-                        alignItems: "flex-start",
-                        gap: 12,
-                        marginBottom: 6,
+                        alignItems: "baseline",
+                        gap: 8,
+                        paddingTop: 10,
+                        borderTop: "1px solid #f0f1f4",
                       }}
                     >
+                      <span
+                        style={{
+                          fontSize: 13,
+                          fontWeight: 700,
+                          color: "#444",
+                        }}
+                      >
+                        {group.label}
+                      </span>
+
+                      <span
+                        style={{
+                          fontSize: 12,
+                          color: "#999",
+                        }}
+                      >
+                        {group.tasks.length}{" "}
+                        {group.tasks.length === 1
+                          ? "task"
+                          : "tasks"}
+                      </span>
+                    </div>
+
+                    {group.tasks.map((task) => (
                       <div
+                        key={task.id}
                         style={{
-                          fontSize: 15,
-                          fontWeight: 600,
+                          paddingTop: 10,
+                          borderTop: "1px solid #f0f1f4",
                         }}
                       >
-                        {task.sequence}. {task.name}
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent:
+                              "space-between",
+                            alignItems: "flex-start",
+                            gap: 12,
+                            marginBottom: 6,
+                          }}
+                        >
+                          <div
+                            style={{
+                              fontSize: 15,
+                              fontWeight: 600,
+                            }}
+                          >
+                            {task.sequence}. {task.name}
+                          </div>
+
+                          <Badge
+                            text={
+                              TASK_STATUS_LABELS[
+                                task.status
+                              ] ?? task.status
+                            }
+                            color="#555"
+                          />
+                        </div>
+
+                        <div
+                          style={{
+                            display: "flex",
+                            flexWrap: "wrap",
+                            gap: 6,
+                          }}
+                        >
+                          <Badge
+                            text={
+                              CATEGORY_LABELS[
+                                task.category
+                              ] ?? task.category
+                            }
+                            color="#5a4ce1"
+                          />
+
+                          <Badge
+                            text={
+                              COMPLEXITY_LABELS[
+                                task.complexity
+                              ] ?? task.complexity
+                            }
+                            color="#3976cf"
+                          />
+
+                          <Badge
+                            text={stageLabel(
+                              stages,
+                              task.stage_id
+                            )}
+                            color="#0e7a5f"
+                          />
+                        </div>
+
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 8,
+                            marginTop: 8,
+                          }}
+                        >
+                          <label
+                            htmlFor={`taskStage-${task.id}`}
+                            style={{
+                              fontSize: 12,
+                              fontWeight: 700,
+                              color: "#666",
+                            }}
+                          >
+                            Stage
+                          </label>
+
+                          <select
+                            id={`taskStage-${task.id}`}
+                            value={task.stage_id ?? ""}
+                            disabled={
+                              pendingStageTaskIds[task.id] ===
+                              true
+                            }
+                            onChange={(event) =>
+                              handleStageChange(
+                                task.id,
+                                event.target.value
+                              )
+                            }
+                            style={{
+                              ...inputStyle,
+                              width: "auto",
+                              minWidth: 150,
+                              padding: "5px 8px",
+                              fontSize: 13,
+                            }}
+                          >
+                            <option value="">No stage</option>
+                            {stages.map((stage) => (
+                              <option
+                                key={stage.id}
+                                value={stage.id}
+                              >
+                                {stage.status === "archived"
+                                  ? `${stage.name} (Archived)`
+                                  : stage.name}
+                              </option>
+                            ))}
+                          </select>
+
+                          {pendingStageTaskIds[task.id] ? (
+                            <span
+                              style={{
+                                color: "#666",
+                                fontSize: 12,
+                              }}
+                            >
+                              Saving…
+                            </span>
+                          ) : null}
+                        </div>
+
+                        {stageEditErrors[task.id] ? (
+                          <p
+                            role="alert"
+                            style={{
+                              margin: "6px 0 0",
+                              color: "#b42318",
+                              fontSize: 12,
+                              lineHeight: 1.5,
+                            }}
+                          >
+                            {stageEditErrors[task.id]}
+                          </p>
+                        ) : null}
+
+                        {task.description ? (
+                          <p
+                            style={{
+                              margin: "8px 0 0",
+                              color: "#666",
+                              fontSize: 13,
+                              lineHeight: 1.5,
+                            }}
+                          >
+                            {task.description}
+                          </p>
+                        ) : null}
+
+                        <div
+                          style={{
+                            marginTop: 10,
+                          }}
+                        >
+                          <button
+                            type="button"
+                            onClick={() =>
+                              toggleTaskAiOptions(task.id)
+                            }
+                            style={{
+                              padding: "6px 10px",
+                              borderRadius: 8,
+                              border: "1px solid #ddd",
+                              background: "#fff",
+                              fontSize: 13,
+                              fontWeight: 600,
+                            }}
+                          >
+                            {expandedTaskIds[task.id]
+                              ? "Hide AI options"
+                              : "Show AI options"}
+                          </button>
+                        </div>
+
+                        {loadedTaskIds[task.id] ? (
+                          <TaskAiOptions
+                            taskId={task.id}
+                            planStrategy={
+                              plan.strategy
+                            }
+                            expanded={
+                              expandedTaskIds[task.id] ===
+                              true
+                            }
+                          />
+                        ) : null}
                       </div>
-
-                      <Badge
-                        text={
-                          TASK_STATUS_LABELS[
-                            task.status
-                          ] ?? task.status
-                        }
-                        color="#555"
-                      />
-                    </div>
-
-                    <div
-                      style={{
-                        display: "flex",
-                        flexWrap: "wrap",
-                        gap: 6,
-                      }}
-                    >
-                      <Badge
-                        text={
-                          CATEGORY_LABELS[
-                            task.category
-                          ] ?? task.category
-                        }
-                        color="#5a4ce1"
-                      />
-
-                      <Badge
-                        text={
-                          COMPLEXITY_LABELS[
-                            task.complexity
-                          ] ?? task.complexity
-                        }
-                        color="#3976cf"
-                      />
-                    </div>
-
-                    {task.description ? (
-                      <p
-                        style={{
-                          margin: "8px 0 0",
-                          color: "#666",
-                          fontSize: 13,
-                          lineHeight: 1.5,
-                        }}
-                      >
-                        {task.description}
-                      </p>
-                    ) : null}
-
-                    <div
-                      style={{
-                        marginTop: 10,
-                      }}
-                    >
-                      <button
-                        type="button"
-                        onClick={() =>
-                          toggleTaskAiOptions(task.id)
-                        }
-                        style={{
-                          padding: "6px 10px",
-                          borderRadius: 8,
-                          border: "1px solid #ddd",
-                          background: "#fff",
-                          fontSize: 13,
-                          fontWeight: 600,
-                        }}
-                      >
-                        {expandedTaskIds[task.id]
-                          ? "Hide AI options"
-                          : "Show AI options"}
-                      </button>
-                    </div>
-
-                    {loadedTaskIds[task.id] ? (
-                      <TaskAiOptions
-                        taskId={task.id}
-                        planStrategy={
-                          plan.strategy
-                        }
-                        expanded={
-                          expandedTaskIds[task.id] ===
-                          true
-                        }
-                      />
-                    ) : null}
+                    ))}
                   </div>
                 ))}
               </div>

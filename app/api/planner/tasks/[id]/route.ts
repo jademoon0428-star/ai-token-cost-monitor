@@ -26,6 +26,12 @@ export const runtime = "nodejs";
  * own guarded transition, which this phase does not expose. taskId is
  * not here either: the execution-task link is a separate command
  * (linkProjectTaskToExecutionTask) and is not part of an edit.
+ *
+ * stageId is the one structural field that IS here (M2-A): a string
+ * re-groups the step under a stage of the same project, an explicit
+ * null unbinds it, and a stage from another project is refused by the
+ * service with STAGE_PROJECT_MISMATCH. Omitting the key leaves the
+ * current grouping untouched.
  */
 const PATCH_FIELDS: readonly PlannerFieldSpec[] = [
   { key: "name", type: "string" },
@@ -45,6 +51,7 @@ const PATCH_FIELDS: readonly PlannerFieldSpec[] = [
   { key: "estimatedInputTokensMax", type: "number" },
   { key: "estimatedOutputTokensMin", type: "number" },
   { key: "estimatedOutputTokensMax", type: "number" },
+  { key: "stageId", type: "string" },
 ];
 
 /*

@@ -390,6 +390,44 @@ export function initDb() {
     );
 
     /*
+     * A stage is one ordered phase of a project's work (e.g.
+     * requirements, development, delivery). Stages belong to the
+     * PROJECT, not to a plan: every plan version and every generated
+     * combination plan of the same project shares one set of stages,
+     * which is why combination generation never copies them. Tasks
+     * reference a stage through project_tasks.stage_id.
+     *
+     * Stages are structure, not measurement: there is deliberately
+     * no estimated time, cost, token, efficiency or progress column
+     * here. Any stage-level figure is aggregated at read time from
+     * the tasks that reference it, and a stage with no tasks has no
+     * figure (unknown, never 0). No score / rank / tier / weight /
+     * confidence column exists here either.
+     *
+     * status only archives. A stage that still has tasks pointing at
+     * it is archived, never deleted, so historical plans keep the
+     * grouping they were planned with; the service layer enforces
+     * that rule, not this table.
+     */
+    CREATE TABLE IF NOT EXISTS project_stages (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      description TEXT,
+      sequence INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'active' CHECK(
+        status IN (
+          'active',
+          'archived'
+        )
+      ),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(project_id, sequence),
+      FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+    );
+
+    /*
      * A plan is one version of the approach for a project. Versions
      * are immutable rows; a new version is a new row, never an
      * update of an old one.
@@ -440,6 +478,14 @@ export function initDb() {
      * may produce many execution sessions over its life, and sessions
      * remain owned by the existing Task Session layer.
      *
+     * stage_id is the optional link to the project's stage layer. The
+     * stage belongs to the project, so every plan version of the same
+     * project shares one set of stages. NULL means the step is not
+     * grouped into any stage: a fact about grouping, never read as a
+     * cost or token unknown, and never backfilled. ON DELETE SET NULL
+     * is defence in depth only - the service layer refuses to delete
+     * a stage that still has steps pointing at it.
+     *
      * estimated_*_tokens are the user's or the Planner's estimate of
      * the step, NOT a measurement, and NOT a cost. Cost and time live
      * in project_task_ai_options.
@@ -453,6 +499,7 @@ export function initDb() {
       id TEXT PRIMARY KEY,
       plan_id TEXT NOT NULL,
       task_id TEXT,
+      stage_id TEXT,
       sequence INTEGER NOT NULL,
       name TEXT NOT NULL,
       category TEXT NOT NULL CHECK(
@@ -494,7 +541,8 @@ export function initDb() {
       updated_at TEXT NOT NULL,
       UNIQUE(plan_id, sequence),
       FOREIGN KEY(plan_id) REFERENCES project_plans(id) ON DELETE CASCADE,
-      FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE SET NULL
+      FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE SET NULL,
+      FOREIGN KEY(stage_id) REFERENCES project_stages(id) ON DELETE SET NULL
     );
 
     /*
@@ -597,6 +645,9 @@ export function initDb() {
 
     CREATE INDEX IF NOT EXISTS idx_project_tasks_task
       ON project_tasks(task_id);
+
+    CREATE INDEX IF NOT EXISTS idx_project_stages_status
+      ON project_stages(project_id, status);
 
     CREATE INDEX IF NOT EXISTS idx_project_task_ai_options_task
       ON project_task_ai_options(project_task_id);
@@ -772,6 +823,7 @@ export function initDb() {
   migrateProjectPlansStrategyEnum(db);
   migrateAiResourcesOwnerChannel(db);
   migrateAiResourcesPricingBasis(db);
+  migrateProjectTasksStageId(db);
 }
 
 function migrateBudgetsTable(db: ReturnType<typeof getDb>) {
@@ -1258,4 +1310,69 @@ function migrateAiResourcesPricingBasis(
   };
 
   transaction();
+}
+/*
+ * M1 stage layer: adds project_tasks.stage_id to databases created
+ * before the column existed. project_stages itself needs no
+ * migration - it is created by CREATE TABLE IF NOT EXISTS in
+ * initDb's main block, like every other table.
+ *
+ * The column is additive and nullable. Existing steps keep NULL,
+ * which means "not grouped into a stage" and is never backfilled:
+ * grouping is the user's structure, not a fact the system may
+ * invent. No table is rebuilt, no CHECK changes, and no other
+ * column is touched.
+ *
+ * The index is created here rather than in initDb's main block
+ * because the main block runs BEFORE this migration: on a database
+ * that does not have stage_id yet, CREATE INDEX in the main block
+ * would fail with "no such column". Running it after the column is
+ * guaranteed covers both paths identically - a fresh database
+ * (column came from CREATE TABLE) and an old one (column just
+ * added above) - and IF NOT EXISTS keeps it idempotent on every
+ * subsequent repository call.
+ */
+function migrateProjectTasksStageId(
+  db: ReturnType<typeof getDb>
+) {
+  const columns = db
+    .prepare(
+      `PRAGMA table_info(project_tasks)`
+    )
+    .all() as { name: string }[];
+
+  const alreadyHasStageId = columns.some(
+    (column) => column.name === "stage_id"
+  );
+
+  if (!alreadyHasStageId) {
+    const transaction = () => {
+      db.exec(`BEGIN`);
+
+      try {
+        db.exec(
+          `ALTER TABLE project_tasks
+            ADD COLUMN stage_id TEXT
+            REFERENCES project_stages(id) ON DELETE SET NULL;`
+        );
+
+        db.exec(`COMMIT`);
+      } catch (error) {
+        try {
+          db.exec(`ROLLBACK`);
+        } catch {
+          // Ignore rollback errors so the original migration error is preserved.
+        }
+
+        throw error;
+      }
+    };
+
+    transaction();
+  }
+
+  db.exec(
+    `CREATE INDEX IF NOT EXISTS idx_project_tasks_stage
+      ON project_tasks(stage_id);`
+  );
 }

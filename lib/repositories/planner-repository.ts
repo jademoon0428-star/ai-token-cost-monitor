@@ -52,6 +52,13 @@ export type ProjectTaskRow = {
   id: string;
   plan_id: string;
   task_id: string | null;
+  /*
+   * M2-A: the optional stage this step is grouped under. NULL means
+   * "not grouped", never "some default stage"; the column list below
+   * returns it on every read so the API and UI can bind, unbind and
+   * group without a second query.
+   */
+  stage_id: string | null;
   sequence: number;
   name: string;
   category: string;
@@ -221,6 +228,7 @@ export type CreateProjectTaskInput = {
   id: string;
   planId: string;
   taskId?: string | null;
+  stageId?: string | null;
   sequence: number;
   name: string;
   category: ProjectTaskCategory;
@@ -236,6 +244,7 @@ export type CreateProjectTaskInput = {
 };
 
 export type UpdateProjectTaskInput = {
+  stageId?: string | null;
   name?: string;
   category?: ProjectTaskCategory;
   complexity?: ProjectTaskComplexity;
@@ -282,6 +291,50 @@ export type CreateProjectTaskAiOptionInput = {
   createdAt: string;
 };
 
+/*
+ * M1 stage layer (PLANNER_STAGE_AND_TASK_MODEL_DESIGN.md).
+ *
+ * A stage is an ordered phase of a project's work. Stages belong to
+ * the project, not to a plan, so every plan version and every
+ * generated combination plan of the same project shares one set.
+ *
+ * Plain data access only: no delete-protection rule, no ordering
+ * business rule and no validation live in this section. The rule
+ * "a stage that still has tasks is archived, never deleted" belongs
+ * to the service layer; countProjectStageTasks below only answers
+ * the factual question the service needs to ask.
+ */
+export type ProjectStageStatus =
+  | "active"
+  | "archived";
+
+export type ProjectStageRow = {
+  id: string;
+  project_id: string;
+  name: string;
+  description: string | null;
+  sequence: number;
+  status: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CreateProjectStageInput = {
+  id: string;
+  projectId: string;
+  name: string;
+  description?: string | null;
+  sequence: number;
+  createdAt: string;
+};
+
+export type UpdateProjectStageInput = {
+  name?: string;
+  description?: string | null;
+  sequence?: number;
+  updatedAt: string;
+};
+
 const PROJECT_COLUMNS = `
   id,
   name,
@@ -292,6 +345,17 @@ const PROJECT_COLUMNS = `
   budget_max_micros,
   budget_currency,
   deadline_days,
+  status,
+  created_at,
+  updated_at
+`;
+
+const PROJECT_STAGE_COLUMNS = `
+  id,
+  project_id,
+  name,
+  description,
+  sequence,
   status,
   created_at,
   updated_at
@@ -311,6 +375,7 @@ const PROJECT_TASK_COLUMNS = `
   id,
   plan_id,
   task_id,
+  stage_id,
   sequence,
   name,
   category,
@@ -546,6 +611,214 @@ export function updateProjectStatus(
     .run(status, updatedAt, id);
 }
 
+export function createProjectStage(
+  input: CreateProjectStageInput
+): void {
+  initDb();
+
+  getDb()
+    .prepare(
+      `
+        INSERT INTO project_stages
+        (
+          id,
+          project_id,
+          name,
+          description,
+          sequence,
+          created_at,
+          updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `
+    )
+    .run(
+      input.id,
+      input.projectId,
+      input.name,
+      input.description ?? null,
+      input.sequence,
+      input.createdAt,
+      input.createdAt
+    );
+}
+
+/*
+ * The sequence the next stage of this project will get.
+ *
+ * Stages 1, 2, 3 return 4; a project with no stages returns 1. This
+ * is what keeps UNIQUE(project_id, sequence) satisfied without the
+ * client ever choosing a sequence, the same way
+ * nextProjectTaskSequence works for steps.
+ */
+export function nextProjectStageSequence(
+  projectId: string
+): number {
+  initDb();
+
+  const row = getDb()
+    .prepare(
+      `
+        SELECT MAX(sequence) AS highest
+        FROM project_stages
+        WHERE project_id = ?
+      `
+    )
+    .get(projectId) as
+    | { highest: number | null }
+    | undefined;
+
+  return (row?.highest ?? 0) + 1;
+}
+
+export function getProjectStages(
+  projectId: string
+): ProjectStageRow[] {
+  initDb();
+
+  return getDb()
+    .prepare(
+      `
+        SELECT ${PROJECT_STAGE_COLUMNS}
+        FROM project_stages
+        WHERE project_id = ?
+        ORDER BY sequence ASC
+      `
+    )
+    .all(projectId) as ProjectStageRow[];
+}
+
+export function getProjectStageById(
+  id: string
+): ProjectStageRow | undefined {
+  initDb();
+
+  return getDb()
+    .prepare(
+      `
+        SELECT ${PROJECT_STAGE_COLUMNS}
+        FROM project_stages
+        WHERE id = ?
+      `
+    )
+    .get(id) as ProjectStageRow | undefined;
+}
+
+export function updateProjectStage(
+  id: string,
+  input: UpdateProjectStageInput
+): ProjectStageRow | undefined {
+  initDb();
+
+  const assignments: string[] = [];
+  const params: Array<string | number | null> = [];
+
+  if (input.name !== undefined) {
+    assignments.push("name = ?");
+    params.push(input.name);
+  }
+
+  if (input.description !== undefined) {
+    assignments.push("description = ?");
+    params.push(input.description);
+  }
+
+  if (input.sequence !== undefined) {
+    assignments.push("sequence = ?");
+    params.push(input.sequence);
+  }
+
+  if (assignments.length === 0) {
+    return getProjectStageById(id);
+  }
+
+  assignments.push("updated_at = ?");
+  params.push(input.updatedAt);
+
+  getDb()
+    .prepare(
+      `
+        UPDATE project_stages
+        SET ${assignments.join(", ")}
+        WHERE id = ?
+      `
+    )
+    .run(...params, id);
+
+  return getProjectStageById(id);
+}
+
+/*
+ * The dedicated status change. status is not part of the generic
+ * update path: archiving is this one operation, and it never
+ * deletes the row.
+ */
+export function archiveProjectStage(
+  id: string,
+  updatedAt: string
+): void {
+  initDb();
+
+  getDb()
+    .prepare(
+      `
+        UPDATE project_stages
+        SET
+          status = 'archived',
+          updated_at = ?
+        WHERE id = ?
+      `
+    )
+    .run(updatedAt, id);
+}
+
+/*
+ * How many planned steps currently point at this stage.
+ *
+ * A factual count for the service's delete check, nothing more: the
+ * repository reports the number, the service decides what it means.
+ */
+export function countProjectStageTasks(
+  stageId: string
+): number {
+  initDb();
+
+  const row = getDb()
+    .prepare(
+      `
+        SELECT COUNT(*) AS count
+        FROM project_tasks
+        WHERE stage_id = ?
+      `
+    )
+    .get(stageId) as
+    | { count: number }
+    | undefined;
+
+  return row?.count ?? 0;
+}
+
+/*
+ * Physical delete. The "only delete an unreferenced stage" rule is
+ * a service-layer decision and is deliberately not enforced here;
+ * the schema's ON DELETE SET NULL keeps the data consistent if a
+ * referenced stage is ever removed.
+ */
+export function deleteProjectStage(
+  id: string
+): void {
+  initDb();
+
+  getDb()
+    .prepare(
+      `
+        DELETE FROM project_stages
+        WHERE id = ?
+      `
+    )
+    .run(id);
+}
+
 export function createProjectPlan(
   input: CreateProjectPlanInput
 ): void {
@@ -652,6 +925,7 @@ export function createProjectTask(
           id,
           plan_id,
           task_id,
+          stage_id,
           sequence,
           name,
           category,
@@ -666,13 +940,14 @@ export function createProjectTask(
           created_at,
           updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `
     )
     .run(
       input.id,
       input.planId,
       input.taskId ?? null,
+      input.stageId ?? null,
       input.sequence,
       input.name,
       input.category,
@@ -779,6 +1054,11 @@ export function updateProjectTask(
 
   const assignments: string[] = [];
   const params: Array<string | number | null> = [];
+
+  if (input.stageId !== undefined) {
+    assignments.push("stage_id = ?");
+    params.push(input.stageId);
+  }
 
   if (input.name !== undefined) {
     assignments.push("name = ?");

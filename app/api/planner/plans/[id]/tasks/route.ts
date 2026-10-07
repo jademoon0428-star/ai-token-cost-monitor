@@ -33,6 +33,12 @@ export const runtime = "nodejs";
  * taskId is accepted because it is the one and only link between the
  * Planner and the Task Session layer: it points at an existing row in
  * tasks. No session is created, started or read here.
+ *
+ * stageId is the optional M2-A grouping link: a string binds the new
+ * step to a stage, null or absent leaves it ungrouped. The service
+ * refuses a stage that belongs to another project
+ * (STAGE_PROJECT_MISMATCH) - the column exists, the ownership rule
+ * lives in the service.
  */
 const CREATE_FIELDS: readonly PlannerFieldSpec[] = [
   { key: "name", type: "string", required: true },
@@ -55,6 +61,7 @@ const CREATE_FIELDS: readonly PlannerFieldSpec[] = [
   { key: "estimatedOutputTokensMin", type: "number" },
   { key: "estimatedOutputTokensMax", type: "number" },
   { key: "taskId", type: "string" },
+  { key: "stageId", type: "string" },
 ];
 
 export async function POST(
