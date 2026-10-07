@@ -3,6 +3,7 @@ import {
   listUserAiTools,
 } from "@/lib/registry/ai-registry-repository";
 import { AiResources } from "@/components/planner/ai-resources";
+import { DeclaredResources } from "@/components/planner/declared-resources";
 
 /*
  * R3.2 AI Resources page.
@@ -10,6 +11,12 @@ import { AiResources } from "@/components/planner/ai-resources";
  * This page manages registered AI resources. The resources themselves
  * are always read and written through the R3.1 Planner Resource API,
  * so this file never reaches ai_resources directly.
+ *
+ * The declared resources section below is the other half of the
+ * inventory: ways the user reaches a model this app cannot see for
+ * itself. It reads and writes only /api/planner/declarations, so a
+ * declaration never becomes a models row, a providers row or an
+ * ai_resources row from this page.
  *
  * The only data prepared here is the lookup lists for the form and
  * for the cards: the user's registered tools and the registry's
@@ -29,21 +36,25 @@ export default function PlannerResourcesPage() {
   const providers = listAiRegistry();
 
   return (
-    <AiResources
-      tools={tools.map((tool) => ({
-        id: tool.id,
-        name: tool.name,
-        category: tool.category,
-        status: tool.status,
-      }))}
-      providers={providers.map((provider) => ({
-        id: provider.id,
-        name: provider.name,
-        models: provider.models.map((model) => ({
-          id: model.id,
-          name: model.name,
-        })),
-      }))}
-    />
+    <>
+      <AiResources
+        tools={tools.map((tool) => ({
+          id: tool.id,
+          name: tool.name,
+          category: tool.category,
+          status: tool.status,
+        }))}
+        providers={providers.map((provider) => ({
+          id: provider.id,
+          name: provider.name,
+          models: provider.models.map((model) => ({
+            id: model.id,
+            name: model.name,
+          })),
+        }))}
+      />
+
+      <DeclaredResources />
+    </>
   );
 }
