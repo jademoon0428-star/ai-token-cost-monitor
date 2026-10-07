@@ -72,6 +72,8 @@ type PlanResourceAssignmentRow = {
   ai_resource_id: string | null;
   registry_model_id: string | null;
   resource_source: string;
+  resource_name: string | null;
+  resource_provider: string | null;
   role: string;
   role_source: string;
   is_primary: number;
@@ -269,6 +271,27 @@ function formatTokenTotal(evidence: VerifiedUsageEvidence): string {
   }
 
   return String(total);
+}
+
+/*
+ * The display label of an assignment's resource. The API's resolved
+ * name wins when it has one - a registered resource by its
+ * ai_resources name, a registry model by "provider - model" - and the
+ * stored id is the fallback when it does not, because a name the API
+ * never sent would be an invented fact.
+ */
+function assignmentResourceLabel(
+  assignment: PlanResourceAssignmentRow
+): string {
+  if (assignment.resource_name !== null) {
+    return assignment.resource_provider !== null
+      ? `${assignment.resource_provider} · ${assignment.resource_name}`
+      : assignment.resource_name;
+  }
+
+  return assignment.resource_source === "registry"
+    ? `Registry model ${assignment.registry_model_id}`
+    : `Registered resource ${assignment.ai_resource_id}`;
 }
 
 /*
@@ -1957,10 +1980,9 @@ export default function PlanDetailPage() {
               >
                 {assignments.map((assignment) => {
                   const resource =
-                    assignment.resource_source ===
-                    "registry"
-                      ? `Registry model ${assignment.registry_model_id}`
-                      : `Registered resource ${assignment.ai_resource_id}`;
+                    assignmentResourceLabel(
+                      assignment
+                    );
 
                   const cost =
                     assignment.planned_cost_min_micros !==

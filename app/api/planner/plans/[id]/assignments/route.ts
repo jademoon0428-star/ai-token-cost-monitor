@@ -4,6 +4,7 @@ import {
   plannerNotFoundResponse,
   plannerServerErrorResponse,
 } from "@/lib/planner-api-errors";
+import { getRegistryModel } from "@/lib/registry/ai-registry-repository";
 import { getAiResource } from "@/lib/repositories/ai-resource-repository";
 import {
   getProjectPlan,
@@ -66,6 +67,14 @@ function modelIdForAssignment(
  * with the verified historical usage evidence of that assignment's
  * model. It is display context only: it never feeds planned_cost_*,
  * cost_basis or pricing_basis_kind, and never becomes a nominal price.
+ *
+ * Each item also carries resource_name and resource_provider, the
+ * display name of what it points at: a registered resource keeps its
+ * ai_resources name, a registry model gets its provider name and
+ * model name from the registry row. Both are resolved from records
+ * that already exist, at read time; when no record supplies a name
+ * the fields are null and the caller falls back to the stored id, so
+ * no name is ever invented here.
  */
 export async function GET(
   _request: Request,
@@ -108,6 +117,11 @@ export async function GET(
       string
     >();
 
+    const nameByResource = new Map<
+      string,
+      string
+    >();
+
     for (const resourceId of registeredIds) {
       const resource = getAiResource(
         resourceId
@@ -118,6 +132,41 @@ export async function GET(
           resourceId,
           resource.model_id
         );
+        nameByResource.set(
+          resourceId,
+          resource.name
+        );
+      }
+    }
+
+    const registryIds = [
+      ...new Set(
+        items
+          .filter(
+            (item) =>
+              item.resource_source ===
+                "registry" &&
+              item.registry_model_id !== null
+          )
+          .map(
+            (item) => item.registry_model_id!
+          )
+      ),
+    ];
+
+    const nameByRegistryModel = new Map<
+      string,
+      { name: string; provider: string }
+    >();
+
+    for (const modelId of registryIds) {
+      const model = getRegistryModel(modelId);
+
+      if (model) {
+        nameByRegistryModel.set(modelId, {
+          name: model.name,
+          provider: model.provider_name,
+        });
       }
     }
 
@@ -157,8 +206,30 @@ export async function GET(
             : (evidenceByModel[modelId] ??
                 null);
 
+        const registryNames =
+          item.resource_source === "registry" &&
+          item.registry_model_id !== null
+            ? nameByRegistryModel.get(
+                item.registry_model_id
+              )
+            : undefined;
+
+        const resource_name =
+          item.resource_source === "registry"
+            ? (registryNames?.name ?? null)
+            : item.ai_resource_id !== null
+              ? (nameByResource.get(
+                  item.ai_resource_id
+                ) ?? null)
+              : null;
+
+        const resource_provider =
+          registryNames?.provider ?? null;
+
         return {
           ...item,
+          resource_name,
+          resource_provider,
           evidenceSummary,
         };
       }
