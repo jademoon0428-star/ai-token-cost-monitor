@@ -335,6 +335,92 @@ export function initDb() {
       );
 
     /*
+     * Declared external AI resources (AI Resource Universe).
+     *
+     * A declaration is a user statement about a way of reaching an AI
+     * model that this app cannot see on its own: a web subscription, a
+     * third-party gateway, a colleague's account. It is deliberately a
+     * table of its own rather than extra rows in ai_resources or extra
+     * rows in models:
+     *
+     * - It never becomes a models row, so listAiRegistry() and the
+     *   R3.3-B combination pool are untouched by a declaration.
+     * - It never becomes an ai_resources row, because ai_resources is
+     *   the verified "what the user owns" inventory keyed by a real
+     *   registry model id, and a declaration may name no registry model
+     *   at all (see schema.ts above this Planner block: a registry-only
+     *   resource must not be materialised into ai_resources either).
+     * - It stores no credential, no key, no token and no balance. The
+     *   only reachability fact recorded is channel, and nothing in this
+     *   app ever opens a connection from it.
+     *
+     * provider_name / model_name are free text on purpose: they are
+     * the user's own naming for something outside this registry, and
+     * inventing a providers/models id for them would present an
+     * unverified claim as a registry fact.
+     *
+     * supports_* are the same three-state facts ai_model_capabilities
+     * carries: 0 / 1 / NULL, where NULL means "not stated". They feed
+     * the existing fit estimator unchanged, so a declared resource is
+     * judged by the same capability rules as a registry model and is
+     * never assumed capable.
+     *
+     * pricing_state records only whether the user states a price is
+     * known. It is not a rate: no currency, no number and no cost is
+     * derived from it, and the Money Layer never reads this table.
+     *
+     * status is a closed enum. Rows are archived, never deleted, so a
+     * historical candidate that points at one still resolves.
+     */
+    CREATE TABLE IF NOT EXISTS declared_ai_resources (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      provider_name TEXT,
+      model_name TEXT,
+      channel TEXT NOT NULL DEFAULT 'unknown' CHECK(
+        channel IN (
+          'own_api',
+          'gateway',
+          'web_only',
+          'unknown'
+        )
+      ),
+      entitlement TEXT NOT NULL DEFAULT 'unknown' CHECK(
+        entitlement IN (
+          'free',
+          'paid',
+          'unknown'
+        )
+      ),
+      pricing_state TEXT NOT NULL DEFAULT 'unknown' CHECK(
+        pricing_state IN (
+          'known',
+          'unknown'
+        )
+      ),
+      supports_tools INTEGER CHECK(
+        supports_tools IN (0, 1)
+      ),
+      supports_vision INTEGER CHECK(
+        supports_vision IN (0, 1)
+      ),
+      supports_reasoning INTEGER CHECK(
+        supports_reasoning IN (0, 1)
+      ),
+      context_window_tokens INTEGER,
+      max_output_tokens INTEGER,
+      status TEXT NOT NULL DEFAULT 'active' CHECK(
+        status IN (
+          'active',
+          'archived'
+        )
+      ),
+      notes TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    /*
      * v1.4-C AI Project Planner (data layer only).
      *
      * Everything in this block is PLANNED data: intent, estimates and
@@ -546,8 +632,15 @@ export function initDb() {
     );
 
     /*
-     * One candidate way of running a planned step: a model, an
+     * One candidate way of running a planned step: a resource, an
      * optional user tool, and the estimated cost and time.
+     *
+     * The resource is referenced exactly one way, by model_id (a
+     * registry model) or by declared_resource_id (an external resource
+     * the user declared). resource_source is deliberately not stored:
+     * whether a model is currently backed by an active ai_resources
+     * row is read back at request time, so an option can never claim a
+     * registration that has since been archived.
      *
      * The Planner never picks one of these. is_selected is set only
      * by an explicit user decision, and selecting one option clears
@@ -568,7 +661,8 @@ export function initDb() {
     CREATE TABLE IF NOT EXISTS project_task_ai_options (
       id TEXT PRIMARY KEY,
       project_task_id TEXT NOT NULL,
-      model_id TEXT NOT NULL,
+      model_id TEXT,
+      declared_resource_id TEXT,
       tool_id TEXT,
       is_selected INTEGER NOT NULL DEFAULT 0 CHECK(
         is_selected IN (0, 1)
@@ -590,8 +684,32 @@ export function initDb() {
       rationale TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
+      /*
+       * A candidate refers to a resource exactly one way, never both:
+       *
+       *   model_id             -> a models row from the AI Registry
+       *   declared_resource_id -> a declared_ai_resources row the user
+       *                           wrote for something the registry
+       *                           cannot see
+       *
+       * This is the same two-id boundary plan_resource_assignments
+       * uses, and for the same reason: a declared external resource
+       * must not be presented as a registry model, and a registry
+       * model must not be presented as something the user declared.
+       */
+      CHECK (
+        (
+          model_id IS NOT NULL
+          AND declared_resource_id IS NULL
+        )
+        OR (
+          model_id IS NULL
+          AND declared_resource_id IS NOT NULL
+        )
+      ),
       FOREIGN KEY(project_task_id) REFERENCES project_tasks(id) ON DELETE CASCADE,
       FOREIGN KEY(model_id) REFERENCES models(id) ON DELETE CASCADE,
+      FOREIGN KEY(declared_resource_id) REFERENCES declared_ai_resources(id) ON DELETE CASCADE,
       FOREIGN KEY(tool_id) REFERENCES user_ai_tools(id) ON DELETE SET NULL
     );
 
@@ -633,6 +751,9 @@ export function initDb() {
 
     CREATE INDEX IF NOT EXISTS idx_ai_resources_tool
       ON ai_resources(tool_id);
+
+    CREATE INDEX IF NOT EXISTS idx_declared_ai_resources_status
+      ON declared_ai_resources(status);
 
     CREATE INDEX IF NOT EXISTS idx_pricing_provider_model
       ON pricing_versions(provider_id, model);
@@ -792,18 +913,21 @@ export function initDb() {
       ON plan_resource_assignments(registry_model_id);
 
     /*
-     * At most one option per (planned step, model, tool). This is an
+     * At most one option per (planned step, resource, tool). This is an
      * expression index because SQLite treats NULLs as distinct in a
-     * plain UNIQUE constraint, which would let the same model be
-     * added twice for the same step with no tool. COALESCE maps NULL
-     * to '' so "no tool" collapses to a single value and stays
-     * distinct from any real tool_id.
+     * plain UNIQUE constraint, which would otherwise let the same
+     * resource be added twice for the same step, or let a declared
+     * resource be added twice while its model_id stays NULL. COALESCE
+     * maps each NULL to '' so "no tool", "no model" and "no
+     * declaration" each collapse to a single value and stay distinct
+     * from a real id.
      */
     CREATE UNIQUE INDEX IF NOT EXISTS idx_project_task_ai_options_unique
       ON project_task_ai_options(
         project_task_id,
-        model_id,
-        COALESCE(tool_id, '')
+        COALESCE(model_id, ''),
+        COALESCE(tool_id, ''),
+        COALESCE(declared_resource_id, '')
       );
 
     /*
@@ -823,6 +947,7 @@ export function initDb() {
   migrateProjectPlansStrategyEnum(db);
   migrateAiResourcesOwnerChannel(db);
   migrateAiResourcesPricingBasis(db);
+  migrateProjectTaskAiOptionsDeclaredResource(db);
   migrateProjectTasksStageId(db);
 }
 
@@ -1311,6 +1436,176 @@ function migrateAiResourcesPricingBasis(
 
   transaction();
 }
+/*
+ * AI Resource Universe: lets a candidate point at a declared external
+ * resource.
+ *
+ * SQLite cannot add a CHECK constraint, cannot make a NOT NULL column
+ * nullable and cannot drop a FOREIGN KEY in place, and this migration
+ * needs all three at once: model_id becomes nullable, declared_resource_id
+ * arrives with its own foreign key, and the "exactly one resource
+ * reference" CHECK has to exist from the first row. So the table is
+ * rebuilt the same way migrateBudgetsTable rebuilds budgets, keeping
+ * every id and every stored value byte for byte.
+ *
+ * idempotent detection: the rebuilt CREATE TABLE is the only place the
+ * string declared_resource_id appears in this table's DDL, so its
+ * presence means the work is already done. Existing rows all carry a
+ * model_id (the old column was NOT NULL) and no declaration, which is
+ * exactly what the new CHECK requires, so the copy always succeeds and
+ * no row is backfilled with an invented reference.
+ *
+ * Nothing outside this table points at an option id, so the rebuild
+ * cannot leave a dangling reference. usage_records, cost_records,
+ * task_sessions and the Money Layer are not touched here.
+ */
+function migrateProjectTaskAiOptionsDeclaredResource(
+  db: ReturnType<typeof getDb>
+) {
+  const existingSql = db
+    .prepare(
+      `SELECT sql
+         FROM sqlite_master
+        WHERE type = 'table'
+          AND name = 'project_task_ai_options'`
+    )
+    .get() as { sql?: string } | undefined;
+
+  const tableSql = existingSql?.sql ?? "";
+
+  if (tableSql.includes("declared_resource_id")) {
+    return;
+  }
+
+  if (tableSql === "") {
+    return;
+  }
+
+  db.exec(`BEGIN`);
+
+  try {
+    db.exec(`
+      ALTER TABLE project_task_ai_options
+        RENAME TO project_task_ai_options_legacy;
+
+      DROP INDEX IF EXISTS idx_project_task_ai_options_task;
+      DROP INDEX IF EXISTS idx_project_task_ai_options_model;
+      DROP INDEX IF EXISTS idx_project_task_ai_options_tool;
+      DROP INDEX IF EXISTS idx_project_task_ai_options_unique;
+
+      CREATE TABLE project_task_ai_options (
+        id TEXT PRIMARY KEY,
+        project_task_id TEXT NOT NULL,
+        model_id TEXT,
+        declared_resource_id TEXT,
+        tool_id TEXT,
+        is_selected INTEGER NOT NULL DEFAULT 0 CHECK(
+          is_selected IN (0, 1)
+        ),
+        cost_min_micros INTEGER,
+        cost_max_micros INTEGER,
+        cost_currency TEXT,
+        time_min_minutes INTEGER,
+        time_max_minutes INTEGER,
+        fit_status TEXT NOT NULL DEFAULT 'unknown' CHECK(
+          fit_status IN (
+            'meets',
+            'below_minimum',
+            'unknown'
+          )
+        ),
+        excluded_reason TEXT,
+        pricing_basis TEXT,
+        rationale TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        CHECK (
+          (
+            model_id IS NOT NULL
+            AND declared_resource_id IS NULL
+          )
+          OR (
+            model_id IS NULL
+            AND declared_resource_id IS NOT NULL
+          )
+        ),
+        FOREIGN KEY(project_task_id) REFERENCES project_tasks(id) ON DELETE CASCADE,
+        FOREIGN KEY(model_id) REFERENCES models(id) ON DELETE CASCADE,
+        FOREIGN KEY(declared_resource_id) REFERENCES declared_ai_resources(id) ON DELETE CASCADE,
+        FOREIGN KEY(tool_id) REFERENCES user_ai_tools(id) ON DELETE SET NULL
+      );
+
+      INSERT INTO project_task_ai_options (
+        id,
+        project_task_id,
+        model_id,
+        declared_resource_id,
+        tool_id,
+        is_selected,
+        cost_min_micros,
+        cost_max_micros,
+        cost_currency,
+        time_min_minutes,
+        time_max_minutes,
+        fit_status,
+        excluded_reason,
+        pricing_basis,
+        rationale,
+        created_at,
+        updated_at
+      )
+      SELECT
+        id,
+        project_task_id,
+        model_id,
+        NULL,
+        tool_id,
+        is_selected,
+        cost_min_micros,
+        cost_max_micros,
+        cost_currency,
+        time_min_minutes,
+        time_max_minutes,
+        fit_status,
+        excluded_reason,
+        pricing_basis,
+        rationale,
+        created_at,
+        updated_at
+      FROM project_task_ai_options_legacy;
+
+      DROP TABLE project_task_ai_options_legacy;
+
+      CREATE INDEX IF NOT EXISTS idx_project_task_ai_options_task
+        ON project_task_ai_options(project_task_id);
+
+      CREATE INDEX IF NOT EXISTS idx_project_task_ai_options_model
+        ON project_task_ai_options(model_id);
+
+      CREATE INDEX IF NOT EXISTS idx_project_task_ai_options_tool
+        ON project_task_ai_options(tool_id);
+
+      CREATE INDEX IF NOT EXISTS idx_project_task_ai_options_unique
+        ON project_task_ai_options(
+          project_task_id,
+          COALESCE(model_id, ''),
+          COALESCE(tool_id, ''),
+          COALESCE(declared_resource_id, '')
+        );
+    `);
+
+    db.exec(`COMMIT`);
+  } catch (error) {
+    try {
+      db.exec(`ROLLBACK`);
+    } catch {
+      // Ignore rollback errors so the original migration error is preserved.
+    }
+
+    throw error;
+  }
+}
+
 /*
  * M1 stage layer: adds project_tasks.stage_id to databases created
  * before the column existed. project_stages itself needs no

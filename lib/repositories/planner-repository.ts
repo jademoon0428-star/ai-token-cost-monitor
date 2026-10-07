@@ -77,7 +77,13 @@ export type ProjectTaskRow = {
 export type ProjectTaskAiOptionRow = {
   id: string;
   project_task_id: string;
-  model_id: string;
+  /*
+   * Exactly one of these two is set, enforced by the table's CHECK:
+   * model_id names a registry model, declared_resource_id names a
+   * resource the user declared about something this app cannot see.
+   */
+  model_id: string | null;
+  declared_resource_id: string | null;
   tool_id: string | null;
   is_selected: number;
   cost_min_micros: number | null;
@@ -276,7 +282,8 @@ export type FitStatus =
 export type CreateProjectTaskAiOptionInput = {
   id: string;
   projectTaskId: string;
-  modelId: string;
+  modelId?: string | null;
+  declaredResourceId?: string | null;
   toolId?: string | null;
   isSelected?: 0 | 1;
   costMinMicros?: number | null;
@@ -395,6 +402,7 @@ const AI_OPTION_COLUMNS = `
   id,
   project_task_id,
   model_id,
+  declared_resource_id,
   tool_id,
   is_selected,
   cost_min_micros,
@@ -1191,6 +1199,7 @@ function insertProjectTaskAiOption(
           id,
           project_task_id,
           model_id,
+          declared_resource_id,
           tool_id,
           is_selected,
           cost_min_micros,
@@ -1205,13 +1214,14 @@ function insertProjectTaskAiOption(
           created_at,
           updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `
   )
     .run(
       input.id,
       input.projectTaskId,
-      input.modelId,
+      input.modelId ?? null,
+      input.declaredResourceId ?? null,
       input.toolId ?? null,
       input.isSelected ?? 0,
       input.costMinMicros ?? null,
@@ -1274,11 +1284,12 @@ export function deleteProjectTaskAiOptions(
  * single atomic unit.
  *
  * The table has no generation or version column and its unique index
- * is (project_task_id, model_id, COALESCE(tool_id, '')), so a second
- * generation cannot be appended alongside the first: the same model
- * would collide. Replace is therefore the only shape the schema
- * supports, and it is also the only one that leaves a readable
- * answer to "what are this step's candidates".
+ * is (project_task_id, COALESCE(model_id, ''), COALESCE(tool_id, ''),
+ * COALESCE(declared_resource_id, '')), so a second generation cannot
+ * be appended alongside the first: the same resource would collide.
+ * Replace is therefore the only shape the schema supports, and it is
+ * also the only one that leaves a readable answer to "what are this
+ * step's candidates".
  *
  * Because the delete and the inserts share one transaction, a
  * failure part way through the batch leaves the previous complete set
