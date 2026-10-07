@@ -203,4 +203,4 @@ AI-Cost-Management-Setup.exe
 AI-Cost-Management-Payload.cab
 
 ## Installer SHA256
-Pending — to be filled after the official v1.5.4 package is built.
+01C130AAA8974FED9218E7F64DB571C78118567D285A0A779276D8BDA4B9951E
