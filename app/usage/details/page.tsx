@@ -750,7 +750,40 @@ export default function UsageDetailsPage() {
           )}
 
           {!loading &&
-            !filtered.length && (
+            !filtered.length &&
+            (rows.length === 0 ? (
+              <div
+                style={{
+                  padding:
+                    "40px",
+                  textAlign:
+                    "center",
+                }}
+              >
+                <p
+                  style={{
+                    margin: 0,
+                    fontSize: 15,
+                  }}
+                >
+                  No usage records yet.
+                </p>
+
+                <p
+                  style={{
+                    margin:
+                      "14px 0 0",
+                  }}
+                >
+                  <Link
+                    className="export"
+                    href="/usage/import"
+                  >
+                    Import official usage export
+                  </Link>
+                </p>
+              </div>
+            ) : (
               <div
                 style={{
                   padding:
@@ -764,7 +797,7 @@ export default function UsageDetailsPage() {
                 match the current
                 filters.
               </div>
-            )}
+            ))}
         </div>
       </section>
     </main>

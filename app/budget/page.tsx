@@ -597,6 +597,49 @@ export default function BudgetPage() {
         </div>
       )}
 
+      {!data.budgets.daily.has_data &&
+        !data.budgets.weekly.has_data &&
+        !data.budgets.monthly.has_data && (
+          <div
+            style={{
+              marginBottom: 14,
+              padding: "13px 16px",
+              borderRadius: 10,
+              background: "#f7f8fa",
+              border: "1px solid #e5e5e5",
+              fontSize: 14,
+              color: "#444",
+            }}
+          >
+            No verified cost imported yet.{" "}
+            <Link
+              href="/usage/import"
+              style={{
+                color: "#5146d9",
+                fontWeight: 600,
+                textDecoration: "none",
+              }}
+            >
+              Import official usage export
+            </Link>
+          </div>
+        )}
+
+      {(data.budgets.daily.status === "not_set" ||
+        data.budgets.weekly.status === "not_set" ||
+        data.budgets.monthly.status === "not_set") && (
+        <p
+          style={{
+            margin: "0 0 14px",
+            fontSize: 13,
+            color: "#888",
+          }}
+        >
+          Amounts below are suggested values, not saved
+          budgets.
+        </p>
+      )}
+
       <section
         style={{
           display: "grid",

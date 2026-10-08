@@ -56,6 +56,10 @@ export default function AIActivityPage() {
 
   const [loading, setLoading] = useState(true);
 
+  const [error, setError] = useState<
+    string | null
+  >(null);
+
   const mountedRef = useRef(false);
   const timerRef = useRef<number | null>(null);
 
@@ -107,6 +111,8 @@ export default function AIActivityPage() {
         scanning: json.scanning ?? false,
       });
 
+      setError(null);
+
       setLoading(Boolean(json.scanning));
 
       return Boolean(json.scanning);
@@ -117,6 +123,10 @@ export default function AIActivityPage() {
       );
 
       if (mountedRef.current) {
+        setError(
+          "Unable to load AI activity data. Please try again."
+        );
+
         setLoading(false);
       }
 
@@ -273,6 +283,15 @@ export default function AIActivityPage() {
           </button>
         </div>
 
+        {error && consumers.length > 0 && (
+          <div
+            role="alert"
+            className="mb-3 rounded border border-red-200 bg-red-50 p-4 text-sm text-red-700"
+          >
+            {error}
+          </div>
+        )}
+
         {consumers.length > 0 ? (
           consumers.map((item) => (
             <div
@@ -346,9 +365,11 @@ export default function AIActivityPage() {
           ))
         ) : (
           <div className="rounded border p-4 text-gray-600">
-            {data.scanning
-              ? "Scanning for reliable AI activity..."
-              : "No reliable AI activity detected."}
+            {error
+              ? error
+              : data.scanning
+                ? "Scanning for reliable AI activity..."
+                : "No reliable AI activity detected."}
           </div>
         )}
       </section>

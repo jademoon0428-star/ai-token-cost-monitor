@@ -721,11 +721,9 @@ export default function Dashboard() {
       });
 
       setTaskError(null);
-    } catch (err) {
+    } catch {
       setTaskError(
-        err instanceof Error
-          ? err.message
-          : "Failed to load task state."
+        "Unable to load task session state."
       );
     } finally {
       setTaskLoading(false);
@@ -793,11 +791,9 @@ export default function Dashboard() {
       }
 
       await loadTasks();
-    } catch (err) {
+    } catch {
       setTaskError(
-        err instanceof Error
-          ? err.message
-          : "Task action failed."
+        "Unable to complete task action."
       );
     } finally {
       setTaskBusy(false);

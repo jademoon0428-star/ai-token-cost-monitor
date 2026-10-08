@@ -834,6 +834,12 @@ export default function SavingPage() {
           </div>
 
           <div className="mt-6 space-y-5">
+            {data.modelBreakdown.length === 0 && (
+              <p className="text-sm text-slate-500">
+                No verified model spending recorded yet.
+              </p>
+            )}
+
             {data.modelBreakdown.map(
               (model) => (
                 <div key={`${model.provider}-${model.model}`}>
