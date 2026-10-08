@@ -1,0 +1,787 @@
+# PROJECT_DIRECTION_AND_DECISIONS
+
+项目长期方向与已确认决策的基准文档。
+事实依据：项目代码结构、`README.md`、`docs/ARCHITECTURE.md`、`docs/PROJECT_STATUS.md`、`docs/CHANGELOG.md`、git 历史（截至 `a2fde32`，`package.json` 版本 `1.5.3`），以及 2026-10-01 的 Planner 架构只读复核。
+
+阅读约定：
+
+- 标注「已实现」的内容以代码为准。
+- 标注「方向 / 未实现」的内容是已确认的决策，不是当前能力，不得当作已交付事实使用。
+- 方向与实现不一致时，差异本身必须显式记录，不允许默认"已经有了"。
+
+---
+
+# 项目名称
+
+AI Cost Management / ai-token-cost-monitor
+
+---
+
+# 1. 产品总体定位
+
+**AI Cost Management 不只是 AI 成本统计工具。**
+
+消费统计只是起点：它证明了"钱花在哪里"，但不能告诉用户"接下来该怎么花"。
+
+核心定位：
+
+**帮助用户自动发现 AI 使用情况、控制 AI 支出，并通过 AI Project Planner 为复杂项目选择最合适的 AI 组合方案。**
+
+产品价值：
+
+**降低 AI 使用成本，提高项目完成效率。**
+
+长期目标：成为用户管理 AI 成本、选择 AI 工具、优化 AI 工作流程的平台。
+
+具体化为三个能力的结合体：
+
+1. **AI 成本管理** — 成本、Token、模型、时间维度的准确记录与预算约束。
+2. **AI 使用效率优化** — 哪些使用是浪费，哪些方式更划算。
+3. **AI 项目规划系统** — 面向一个具体项目，给出"用哪些 AI、按什么顺序、花多少"的执行方案。
+
+价值阶梯（已确认的升级顺序）：
+
+1. 记录过去：花了多少（成本统计，已完成）
+2. 解释过去：为什么花这么多、花在哪（Saving / Efficiency，已完成）
+3. 规划未来：这个项目该用哪些 AI、按什么顺序、预计花多少（Planner，进行中）
+4. 验证结果：实际是否更省、是否更快（需打通 plan → actual 回路，未实现）
+
+---
+
+# 2. 产品核心功能方向
+
+## 第一部分：AI 使用监控与成本管理
+
+包含五项基础能力：
+
+| 能力 | 含义 | 当前状态 |
+| --- | --- | --- |
+| 自动发现 AI 使用 | 自动发现用户正在使用的 AI 工具、AI 项目、AI 消耗行为 | 已实现（本地进程/网络检测、会话解析、Provider 连接器）；AI 项目维度与消耗的关联仍在推进 |
+| AI 使用记录 | 使用记录、Token 消耗、模型维度、时间维度 | 已实现（Money Layer：`usage_records`、`cost_records`） |
+| 成本统计 | 只用来源上报的成本，官方导出/官方 API 才记 verified | 已实现（Dashboard、Usage、Saving、Budget、Efficiency 全部由该层计算） |
+| 异常提醒 | 非预期调用、成本快速增加、长时间运行、未授权消耗 | **部分实现**：Dashboard attention signals + Budget 额度；主动/推送式告警未实现（四个能力中完成度最低） |
+| 支出控制 | 发现浪费、降低成本、优化使用方式 | 已实现（Saving 成本集中度与效率证据、Budget 额度控制）；"给出可执行替代用法"由 Planner 承接 |
+
+基础硬规则（已发布实现，改动需先推翻决策）：
+
+- 供应商不报成本 → 结果是 unknown，不是估算值。
+- 不做货币换算，预算币种不一致直接拒绝。
+- NULL = unknown，永远不是 0。
+
+## 第二部分：AI Project Planner（核心商业价值方向）
+
+**AI Project Planner 是未来主要付费价值。**
+
+不是普通辅助功能，不是附属页面，是从"账单工具"升级为"成本管理平台"的关键载体。
+
+目标：用户面对复杂项目时，**不再使用单一 AI 从头执行全部工作**。
+
+系统根据：
+
+- 项目类型
+- 项目阶段
+- 任务特点
+- AI 能力
+- 成本
+- 时间要求
+
+生成 AI 组合方案。
+
+核心价值：降低 AI 使用成本，提高项目完成效率。
+
+核心商业价值：**AI 资源规划 + 成本优化 + 项目执行效率提升。**
+
+用户愿意付费的核心不是查看历史账单，而是：系统帮助用户降低 AI 成本、提高 AI 使用效率。可推导的付费点按证据强度排序：① 方案预估 vs 实际 verified 成本的对照；② 决策成本被替代（不用自己调研该用哪个模型）；③ 持续的预算与异常监控。local-first（数据不上云）是产品承诺，不是可售卖项。
+
+---
+
+# 3. AI Project Planner 产品模型
+
+目标结构：
+
+```
+项目
+ ↓
+阶段
+ ↓
+任务
+ ↓
+AI 资源组合
+```
+
+每个任务匹配最适合的 AI。
+
+示例（任务特点 → 匹配倾向）：
+
+| 阶段 / 任务 | 匹配倾向 |
+| --- | --- |
+| 需求分析 | 推理能力强的模型 |
+| 代码开发 | 代码能力强的模型 |
+| 测试 | 低成本、快速的模型 |
+| 文档 | 文本能力强且价格低的模型 |
+
+**避免：** 一个昂贵 AI 模型执行全部任务。
+
+**因为：** 不同任务使用不同 AI，可以明显降低成本、提高效率。
+
+## 实现现状（事实，不可省略）
+
+| 模型层 | 状态 |
+| --- | --- |
+| 项目 | 已实现（`projects`） |
+| 阶段 | **未实现**：无 stage/phase 表或列；最接近的是 `project_tasks.category`（任务类型枚举，不是阶段） |
+| 任务 | 已实现（`project_tasks`，含分类、复杂度、Token 上下限、sequence） |
+| 任务依赖 | **未实现**：无 depends_on / blocked_by，顺序只有 `sequence` |
+| AI 资源组合 | 已实现（`plan_resource_assignments`，每方案、每任务、每资源、每角色） |
+
+## 实现上的三条硬约束（已实现，属产品原则而非技术细节）
+
+1. 系统只给事实，不给推荐：不打分、不排名、不选"最优"。选择永远是用户自己的动作。
+2. 未知保持未知：没有价格就是 unknown，不写 0；能力没有记录就是 unknown，不猜。
+3. 估算必须可追溯：每个数字都能追到来源（rate card、任务 Token 估计、时间档位表）。
+
+---
+
+# 4. 五种方案定义（冻结）
+
+**最多提供五种方案。方案是完整项目执行策略，不是简单模型推荐。**
+
+## 方案1：最低成本方案
+
+原则：优先免费 AI、用户已有 AI、本地 AI。
+
+- 综合考虑：用户电脑已有 AI、本地 AI、免费额度 AI、网络上的免费或低成本 AI
+- 适合：不着急完成项目，希望以最低成本完成
+
+## 方案2：用户已有 AI 方案（必须保留）
+
+原则：充分利用用户已经拥有的——本地 AI、已注册 AI、已购买会员 AI。
+
+- 减少用户重新注册、下载新软件、学习新工具、购买新会员的成本
+- 重点：**降低用户使用门槛**；即使不是理论最优，也必须作为实际可执行方案提供
+
+## 方案3：最快完成方案
+
+原则：时间优先，允许更高成本。
+
+- 允许使用更强大的模型、付费模型、多个专业 AI
+- 适合：需要快速完成项目的用户
+
+## 方案4：综合优化方案
+
+原则：成本、速度、质量综合平衡，提供多个综合选择。
+
+## 方案5：高质量方案
+
+原则：优先效果和成功率。
+
+- 适合：商业项目、高要求项目
+
+## 与当前实现的对照（事实）
+
+代码中已有的五种组合策略（`lib/planner/combination-rules.ts` 的 `COMBINATION_STRATEGIES`）：
+
+| 已确认方案 | 代码 ID | 状态 |
+| --- | --- | --- |
+| 方案1 最低成本 | `cost_conscious` | 已实现 |
+| 方案2 用户已有 AI | `existing` | 已实现（对应"已有资源最大利用"） |
+| 方案4 综合优化 | `mixed` | 已实现 |
+| 方案3 最快完成 | — | **未实现**：无对应策略；`time-estimator` 对所有模型返回相同档位（Registry 无延迟/吞吐列），数据上尚不成立 |
+| 方案5 高质量 | — | **未实现** |
+| （代码中另有）会员优先 | `subscription` | 已实现但不在冻结清单内 → 归属待决策 |
+| （代码中另有）市场扩展 | `registry_expanded` | 已实现但不在冻结清单内 → 归属待决策 |
+
+结论：冻结清单中 **2 项待开发**（最快完成、高质量），代码中 **2 项策略待归类**（`subscription`、`registry_expanded`）。开发前必须先做映射决策，方案数量上限为 5，不得静默增删。
+
+---
+
+# 5. 方案展示要求
+
+每个方案必须能够展示，让用户直观看到不同方案的区别：
+
+- 项目阶段
+- 任务
+- 使用 AI
+- 预计时间
+- 预计成本
+- Token 消耗
+- 效率指标（未来逐步实现）
+
+目标形态：
+
+| 阶段 | 任务 | AI 模型 | 预计时间 | 预计成本 | 效率 |
+| --- | --- | --- | --- | --- | --- |
+
+让用户按**价格、速度、质量**自行选择。
+
+## 当前实现对照
+
+| 期望展示 | 当前状态 |
+| --- | --- |
+| 项目阶段 | **未实现**（无阶段层） |
+| 任务 | 已实现 |
+| 使用 AI | 已实现（方案级 `plan_resource_assignments` + 单步候选 `project_task_ai_options`） |
+| 预计时间 | 部分实现（任务级档位，所有模型相同） |
+| 预计成本 | 已实现（min/max + 币种 + 成本依据，未知即 null；含 out-of-pocket 与 api-equivalent 双口径） |
+| Token 消耗 | 已实现（任务级 Token 上下限，是成本与能力估算的输入） |
+| 效率指标 | **未实现**（Planner 无效率字段） |
+| 方案间横向比较视图 | **未实现**（数据已在库中，缺聚合对比接口与对比页面） |
+| 展示质量 | **需小改**：方案详情当前把资源渲染成原始 ID（`Registry model <uuid>`），未显示模型名与任务名 |
+
+状态更正（2026-10-08 只读评审，详版见 §11.9）：
+- 展示质量行部分过时：方案详情资源显示名已在 v1.5.4 修复（assignments 读时解析 `resource_name` / `resource_provider`）；任务名在方案详情仍不可见（见 §11.9 阻塞 B1）。
+- 横向比较视图行可放宽：**M1 不需要聚合对比接口**，现有只读端点足够（聚合端点仅为可选优化，属 M2）。
+
+## AI 来源范围（配套约束）
+
+Planner 推荐 AI 时不要限制：用户电脑已有 AI、当前会员 AI、已有 API。
+
+可以参考市场：免费 AI、开源 AI、商业 AI、专业领域 AI。目标是提供市场最佳组合参考。
+
+当前事实：AI Registry v1 仅 seed 4 家供应商 10 个模型（带 `source_url` / `source_checked_at`），覆盖面是主要瓶颈；扩展 registry 不得引入评分/排名列。用户自有资源记在 `ai_resources`，不存任何密钥。
+
+---
+
+# 6. 产品原则
+
+必须遵守：
+
+- **不做 AI 排名**
+- **不做没有依据的评分**
+- **不制造虚假精确数据**
+- **所有成本和效率数据必须有依据**
+- **免费 AI、本地 AI、用户已有 AI 必须被重视**
+
+配套技术红线（来自已发布实现，改动需先推翻这些决策）：
+
+- 不引入 score / rank / tier / weight / confidence 列。
+- 不做货币换算。
+- 不用估算值填充未上报的成本。
+- 不在运行时自动 seed 数据（registry seed 是手动命令）。
+- 已发布版本与已发布数据不重写：plan 版本只追加，资源只归档不删除。
+
+## 通用开发原则
+
+1. 以真实用户价值为判断标准。
+2. 不为了增加功能而增加功能。
+3. 不做无法验证价值的功能。
+4. 优先保证核心产品价值。
+5. 控制开发时间和成本。
+6. 避免企业级复杂化。
+7. 避免偏离个人用户和小型专业用户场景。
+8. 所有功能必须回答：是否降低 AI 成本？是否提高 AI 使用效率？是否提升产品商业价值？
+
+## Planner 新功能检查表（每次开发前必答）
+
+1. 是否增强 AI 组合规划价值？
+2. 是否帮助用户降低成本？
+3. 是否帮助用户提高项目完成效率？
+4. 是否具有真实商业价值？
+
+避免：为了功能数量增加复杂度、没有实际用户价值的 AI 推荐、空泛的 AI 排名。
+
+---
+
+# 7. 当前明确不做
+
+暂不做：
+
+- 企业复杂管理（权限、组织架构、审计合规）
+- 多用户协作（账号体系、云端同步）
+- 过度自动化（自动替用户选择 AI）
+- 无依据推荐（评分、排名、拍脑袋的"最优"）
+- 为了功能数量增加而增加功能
+
+---
+
+# 8. 当前阶段判断
+
+## 已完成发布（git 历史与 CHANGELOG）
+
+| 版本 | 内容 |
+| --- | --- |
+| v1.0.0 | Windows x64 桌面分发：便携 Node 运行时、standalone 构建、CAB 安装器、卸载 |
+| v1.1.0 | DeepSeek 官方 usage 导出 ZIP 导入（预览只读，确认后单事务写入） |
+| v1.2.0 | 按模型、按天的 Efficiency 视图 |
+| v1.3.0 | Dashboard verified 语义修正；Saving 增加成本集中度与效率证据 |
+| v1.4.0 / v1.4.1 | tasks、task sessions、usage→session 归因、`/api/tasks`、Dashboard Task Session UI、核心模块导航 |
+| v1.5.1 | AI Registry v1、AI Project Planner（项目/计划/步骤/Token 桶）、Planner 资源与组合方案、单步 AI 候选生成 UI、standalone 静态资源修复 |
+| v1.5.2 | 预算修复与 P0 官方成本完整性缺口收口 |
+| v1.5.3 | task sessions 接入 usage 归因，当前 `package.json` 版本 |
+
+技术底盘（同样已交付）：Next.js 16 App Router + React 19 + SQLite（`node:sqlite`，无 ORM）、严格分层、Windows 桌面打包与安装器、20+ 个隔离数据库的 smoke 脚本、`npx tsc --noEmit` 与 `npm run lint` 通过。
+
+## 当前判断
+
+**AI Cost Management 基础能力基本完成。**
+
+**Planner 已具备：**
+
+- 项目（`projects`）
+- 计划（`project_plans`，版本不可变，一个项目可有多个方案行）
+- 任务（`project_tasks`，含分类、复杂度、Token 上下限）
+- AI 资源（`ai_resources` + AI Registry + `plan_resource_assignments`）
+- 成本预测（cost-estimator + 双口径成本，未知即 NULL）
+- 组合方案基础（五策略生成、原子落库、`/plans/[id]/assignments` 读接口、方案详情 UI）
+
+**当前在做（本地未发布）：** Planner 资源拆分（Stage 拆分）。已完成 `resource-universe.ts` 修剪与 `candidate-generator.ts`、`planner-service.ts`、`task-ai-options.tsx` 的 declared 逻辑移除，`npx tsc --noEmit` 通过；declared 模块新文件尚未纳入版本控制；`master` 领先 `origin/master` 8 提交；schema 与数据库结构本轮未改动。
+
+**架构复核结论（2026-10-01，只读）：支持未来方向 62/100。** 数据模型与生成引擎为"多方案"准备度约 80%，外壳缺 4 项（阶段层、速度维度、比较展示、plan→actual 闭环）。
+
+**下一阶段重点：完善 Planner 商业价值**
+
+1. **阶段模型** — 建立 `项目 → 阶段 → 任务` 结构（现无 stage 层，仅有任务类型枚举），必要时补任务依赖。
+2. **AI 组合方案** — 补齐"最快完成""高质量"两种方案；决策 `subscription` / `registry_expanded` 归属；扩 strategy 枚举需走 `schema.ts` 重建表迁移。
+3. **五方案比较** — 输出「阶段｜任务｜AI 模型｜预计时间｜预计成本｜效率」对比视图；方案详情先修模型名/任务名显示（当前是原始 ID）。
+4. **用户已有 AI 支持** — 让本地 AI、未入 registry 的自述资源能进入方案池（现被 `plan_resource_assignments.resource_source` CHECK 与 declared 排除规则挡在外面）。
+5. **预测与实际效果闭环** — 把 usage 归因接回计划，形成"方案预估 vs 实际 verified 成本"对照，这是商业模式的第一条证据。
+
+**前置判断（决定立项）：** "最快完成方案"依赖 Registry 增加模型级速度事实；若厂商文档无法给出可引用的延迟/吞吐，该方案必须降级为近似并同步更新本文档，不得虚构精确数据。
+
+**文档滞后待修：** `docs/CHANGELOG.md` 与 `docs/PROJECT_STATUS.md` 最新条目停在 1.5.1，落后于 `package.json` 的 1.5.3。
+
+---
+
+# 9. 2026-10-06 记录：R3.5 Productivity（R3.5-A / R3.5-B）
+
+## R3.5-A：Productivity API（已完成并提交）
+
+- commit：`a2fde32`（feat: add planner productivity reporting）。
+- 范围：`app/api/planner/plans/[id]/productivity/route.ts`、`lib/services/productivity-service.ts`、`lib/repositories/task-repository.ts`、`scripts/smoke-planner-productivity.mjs`。
+- 验证：productivity smoke 14 passed / 0 failed；`npx tsc --noEmit` 通过；`npx eslint scripts/smoke-planner-productivity.mjs` 通过。
+
+架构边界（事实，后续改动不得擅自突破）：
+
+- API 为只读。
+- 没有 productivity 专用持久化 / 缓存。
+- 不产生 score / rank / recommendation / isPrimary。
+- 不做跨货币计算，不做隐式 FX 转换；不增加 FX API 或货币设置。
+- unreliable / unverified 成本不作为可靠成本参与成本比较。
+
+## 多货币策略（确认）
+
+- 只在同币种之间进行数值比较。
+- 跨币种不计算、不隐式换汇；币种不同只并列展示，不合并成单一数字。
+
+## R3.5-B：Productivity UI（开发完成，已精确 staged，待提交）
+
+- 新增 `components/planner/plan-productivity.tsx`。
+- 已集成到 `app/planner/[projectId]/plans/[planId]/page.tsx`。
+- 该 page.tsx 同时包含 M2 Stage 修改，因此只做 hunk 级精确 staging：
+  当前 staged = 2 files / 635 insertions / 0 deletions（page.tsx 64 行 + plan-productivity.tsx 571 行）。
+- 截至本次文档更新尚未提交，下一步命令：
+  `git commit -m "feat: add planner productivity UI"`。
+
+## M2 与 R3.5-B 边界（不可混同）
+
+- M2 Stage 相关改动仍在 working tree，保持 unstaged，不属于 R3.5-B。
+- 严禁 `git restore` 整个 page.tsx（会连带丢弃 M2 修改）。
+- 严禁把 M2 内容错误提交进 R3.5-B commit。
+
+## 当前下一步
+
+1. 提交 R3.5-B（只提交已精确 staged 的 2 个文件）。
+2. 然后继续 M2 Stage 工作。
+
+不加入任何未经确认的新产品方向。
+
+---
+
+# 10. 2026-10-07 记录：A/B/C 三组完成与架构收口
+
+> 对第 8 节的时点更正：第 8 节"当前在做（本地未发布）/ declared 模块新文件尚未纳入版本控制"是更早时点的记录，
+> 已被本节覆盖——declared 相关代码已全部提交，`master` 本地继续领先远端（今日未 push），schema 与 repository 已对齐。
+
+## 决策 1：A/B/C 三组形成稳定架构边界
+
+| 组 | commit | 内容 | 状态 |
+|---|---|---|---|
+| A | `af020f0` fix: align ai option schema with declared resource column | `project_task_ai_options` nullable `model_id` + `declared_resource_id` + exactly-one 约束 + FK → `declared_ai_resources` + 既有行迁移 + repository 对齐 | 已提交，冻结 |
+| （声明资源本体） | `036a483` feat: add declared resources inventory | declared CRUD repository/service/API/UI + smoke | 已提交，冻结 |
+| B | `6631a63` feat: enrich planner ai option state | AI Option 实时派生 state（名称/provider/来源/注册状态/channel/entitlement/availability/pricing known/capability known），5 文件 | 已提交，冻结 |
+| C | `82b3edc` feat: initialize ai registry baseline on startup | `instrumentation.ts` + `ensureAiRegistryBaseline()` + baseline smoke，3 文件 | 已提交，冻结 |
+
+三组无新证据不重复修改。
+
+## 决策 2：Registry Model 与 Declared Resource 明确区分
+
+- Registry Model：系统已知、来自 AI Registry，是 Planner AI Option candidate pool 的实际来源。
+- Declared Resource：用户声明/登记的额外 AI 资源，是**一类资源**，不是某个具体模型或 Provider。
+- 结构：`AI Registry → Registry Models → Planner AI Options`；`Declared Resources → Resource Inventory`。
+
+## 决策 3：Declared Resources 当前不进入 AI Options candidate pool
+
+- 不进 AI Option candidate pool、不进 `plan_resource_assignments`（CHECK 仅允许 registered / registry）。
+- 不做 cost calculation、不引入 API key / secret / token / 外部 live 调用。
+- `planner-service` 中 `declared_resource_id === null` 的过滤是 **deliberate boundary**，不是遗留错误。
+
+## 决策 4：不做评分 / 排名 / 推荐
+
+B 与 declared 全链路无 score / rank / recommend / tier / weight / quality 逻辑；state 只陈述事实。
+
+## 决策 5：Registry baseline 在 startup 初始化
+
+- Next.js Node runtime 启动时经 `instrumentation.ts → ensureAiRegistryBaseline()` 建立 baseline。
+- models / providers / pricing 用 `INSERT OR IGNORE`（不覆盖既有行）；capabilities 用 `ON CONFLICT DO UPDATE` 按 manifest 刷新。
+- production build phase 跳过；进程级 memo；错误不阻断启动；无 API / launcher / initDb 第二个隐式 caller。
+
+## 决策 6：新安装空 DB 的 Registry 可用性已解决
+
+`空 DB → 启动 instrumentation → registry baseline → listAiRegistry() → Planner candidate generation` 静态追踪成立；打包产物已删除开发库，因此该路径对每个新装用户必然生效。
+
+## 决策 7：下一步先定义 AI Option 产品语义，再决定 Declared 是否入池
+
+必须先回答：
+
+1. AI Option 是"模型选择"还是"AI 资源选择"？
+2. 为什么 `model_id` 与 `declared_resource_id` 要共存？
+3. 没有价格的 Declared Resource 是否允许成为 AI Option？
+4. 用户选择 Declared Resource 后，Productivity / Cost / Task Completion 如何记录？
+
+在此之前不修改 `candidate-generator` / `resource-universe`，不自动把 declared 加入候选池。
+
+（2026-10-08 更新：上述四个问题已全部回答，本决策收口，见 §11。）
+
+## 决策 8：两个 P2 为非阻塞观察（记录，非 blocker）
+
+- **P2-1**：`instrumentation.ts` 的 `await import(...)` 在 try/catch 外，理论上 chunk 缺失时可能影响启动。当前 standalone 产物已确认 chunk 存在 → 暂不修，留待未来"启动韧性加固"专项。
+- **P2-2**：`ensureAiRegistryBaseline` 的进程级 memo 意味着同进程内 Registry 被人为清空后不会自动补种。这是"启动时 baseline"的设计行为，不是 bug → 不修，不为此引入持续检查。
+
+## 收口结论
+
+2026-10-07 只读架构收口审查：**PASS，无 P0、无 P1**。未重新 build、未重跑 smoke/lint。
+
+---
+
+# 11. 2026-10-08 记录：Planner AI Options 产品语义冻结
+
+> 本节回答 §10 决策 7 的四个问题，是其收口。
+> 方式：只读复核 + 语义决策。仅修改 3 份项目文档（本文件、HANDOFF.md、PROJECT_DAILY_LOG.md）；
+> 未修改任何 TypeScript 文件、未调整 schema、未新增 API、未运行代码验证、未 git commit。
+
+## 11.1 复核事实（代码为准）
+
+- `project_task_ai_options`（`lib/schema.ts`）：`model_id XOR declared_resource_id` 表内 CHECK，两列均可空，FK 分别指向 `models` / `declared_ai_resources`，**不存 `resource_source`**（注册状态读取时派生）。
+- repository（`lib/repositories/planner-repository.ts`）只存不判：XOR 完全交给 DB CHECK；service 层 `normalizeAiOptionFields` 强制 `modelId` 非空 → 当前链路写不出 declared 行。
+- candidate pool = `listAiRegistry()` + active `ai_resources`（`buildResourceUniverse`）；`declared_ai_resources` 在整条 planner 生成链中 0 引用（不是被过滤，而是从未进入输入）。
+- `plan_resource_assignments.resource_source` CHECK 仅允许 `registered` / `registry`，declared 连合法枚举值都不存在。
+- 读路径 `listProjectTaskAiOptionsWithState` 显式过滤 `declared_resource_id === null`（deliberate boundary，B 组已注释固化）。
+
+## 11.2 决策 A：AI Option 是「AI 资源选择」，不是「模型选择」
+
+**最终产品语义：一个 AI Option = 这个 planned step 可以用哪一种 AI 资源运行的一条候选记录。**
+
+依据（结合 schema）：
+
+- 表本身就是资源语义：一条 option = 一个资源 + 可选 tool + 估算成本/时间；两个 id 列指向的是**两类资源**（Registry Model / Declared Resource），不是同一种实体的两种写法。
+- `plan_resource_assignments` 用同一 two-id boundary 表达同一件事并显式存 `resource_source`；两条持久化路径回答的都是"哪个资源"。
+- 读路径派生的是资源 state（registration / channel / entitlement / availability / pricing known / capability known），不是模型评分。
+
+边界（不改变现状）：
+
+- 当前实际可选资源只有 AI Registry Model（有无 active `ai_resources` 注册的两态）。
+- Declared Resource 是 schema 已预留的第二类资源入口，尚未进入候选池（见 11.4）。
+- "模型选择"只是当前阶段的 UI 表现形式，不构成本体定义。
+
+## 11.3 决策 B：`model_id` 与 `declared_resource_id` 共存原因（禁止隐式转换）
+
+- `model_id` = AI Registry 中**可验证**的模型：有 registry id、有 source_url、有能力三态事实、有 rate card 才有价格。
+- `declared_resource_id` = 用户声明、Registry 中**不存在**的 AI 资源：自由文本 provider/model 名、三态能力、无费率行。
+- 两者不是同一实体：一个可被系统独立核验，一个只是用户陈述。
+- 不允许隐式转换：
+  1. 不把 declared 物化成 `models` 行（否则把用户陈述变成 registry 事实）。
+  2. 不把 declared 物化成 `ai_resources` 行（`ai_resources` 是"用户拥有"清单，须以真实 registry model id 为键）。
+  3. 不把 registry model 降格成 declared。
+  4. 两列互不回填 id；XOR CHECK 与两条 FK 就是这条规则的数据库表达。
+  5. 任何"转换"只能由用户显式动作完成，系统不自动桥接。
+
+## 11.4 决策 C：Declared Resource 允许后续进入 candidate pool（当前不进入，进入有条件）
+
+**决定：后续允许进入（方向性），当前仍不进入；本轮不实现。**
+
+选"允许"而非"永久禁止"的理由：与 §5「AI 来源范围」（本地 AI、已有 AI 必须被重视）、§8 下一阶段重点 4、HANDOFF 问题 5 一致——"本地 AI / 自述资源进不了组合池"已被登记为缺口；永久禁止会直接推翻这些已确认方向。
+
+**进入条件（全部满足才开工，缺一不进入）：**
+
+1. AI Option 语义冻结（本节已完成）。
+2. **pricing unknown 如何处理**
+   - 无费率 → `cost_min_micros` / `cost_max_micros` / `cost_currency` 三列**同时 NULL**；不写 0、不写估算、不写默认币种。
+   - `declared_ai_resources.pricing_state = 'known'` 只表示"用户声明他知道价格"，**不等于存在可用费率**；没有数字就没有数字，不因此产生成本。
+   - planned cost unknown 的行**不参与任何成本数值比较**（沿用多货币策略：只有同币种才比较，无币种天然不可比），只并列展示 `unknown`。
+   - 不为 declared 新增 FX、估算价、外部 live 报价。
+3. **capability unknown 如何处理**
+   - 三态全 NULL → `fit_status = 'unknown'`，既不是 `meets` 也不是 `below_minimum`。
+   - 显式 0（声明不支持）→ `below_minimum`；显式 1 且满足任务需求 → `meets`。
+   - 复用同一条 fit-estimator 规则，不新增独立判定逻辑、不打分。
+4. **cost / productivity 如何记录**（详见 11.5）
+   - planned 成本 unknown（NULL）；productivity 只对"同币种且有 verified 成本"的行做数值比较，declared 行不参与成本比较，仅参与任务完成与时间维度。
+   - 时间照常记录：time 是 step 属性，与资源无关，不受 declared 影响。
+5. **实现前置（各自单独评审，不打包）**：`ResourceSource` 是否扩第三值、`deriveModelState` 是否加 declared 分支、`plan_resource_assignments.resource_source` CHECK 是否重建表、`planner-service` 过滤 guard 是否替换。
+
+**本轮仍禁止**：把 declared 自动加入候选池、修改 `candidate-generator` / `resource-universe`、为 declared 做任何成本推算。
+
+## 11.5 决策 D：用户选择 Declared Resource 后的数据闭环
+
+**Plan 阶段记录什么**
+
+- `project_task_ai_options`：`declared_resource_id` 非空、`model_id` NULL、`tool_id` NULL、`is_selected = 1`（只能由用户显式选择置位）、`fit_status` 三态、成本三列 NULL、时间列照常、`pricing_basis` / `rationale` 只陈述事实。
+- 不写 `resource_source` 列（读时派生，避免存下过期注册状态）。
+- `plan_resource_assignments` 当前**仍不写** declared 行（CHECK 仅 registered / registry）；组合方案包含 declared 属后续独立决策。
+
+**Actual 阶段记录什么**
+
+- 执行仍走既有链：`tasks` / `task_sessions` / usage 归因，`project_tasks.task_id` 是唯一执行连接。
+- 外部资源本 app 不可测 → Money Layer 收不到 usage → actual cost = **NULL（unknown），不是 0**。
+- 若 declared 实为 own_api / gateway 且 usage 正常导入，actual 成本照常来自 Money Layer，与资源声明无关；资源声明不改变 Money Layer 任何规则。
+- 不因"选择了 declared"新增任何成本来源或外部 live 调用。
+
+**Cost unknown 如何展示**
+
+- 显示 `unknown` / `—`；绝不显示 0、绝不显示假币种、绝不计入合计。
+- 与已知成本**并列展示、不合并数字**（沿用多货币策略与"不制造虚假精确数据"红线）。
+
+**Task completion 如何记录**
+
+- 仍由 `project_tasks.status`（planned / in_progress / done / skipped）与 `task_sessions.status` 记录，与资源类型无关。
+- "done + actual cost unknown" = 完成但成本未知，如实呈现，不反推成本、不补估算。
+
+全程保持现有原则：**NULL = unknown、不虚构成本、不评分、不排名、不推荐。**
+
+## 11.6 风险记录（本轮只记录，不修改代码）
+
+1. **静默不可见**：repository 层 `createProjectTaskAiOption` 不校验 XOR（交给 DB CHECK）。绕过 service 直写 declared 行会通过 CHECK，却被读路径过滤 → 列表不可见，却仍可按 id 被 `selectProjectTaskAiOption` 选中。当前 API 层不产生这种行；实现 declared 入池前必须先消除该口径分叉。
+2. **两表语义不对称**：option 不存 source、assignment 存 source。引入 declared 时 option 侧只需加分支，assignment 侧必须重建表改 CHECK 枚举（SQLite 无法原地改 CHECK）。
+3. **CASCADE 删除**：`model_id` / `declared_resource_id` 均 ON DELETE CASCADE，源行被删会连带清掉候选与用户已做的选择，与"只归档不删除"约定方向相反（现状，备查）。
+4. **productivity 口径分叉**：`productivity-service` 直接读原始行并带出 `declared_resource_id`，与被过滤的 options 列表口径不一致（现状，备查）。
+
+## 11.7 下一阶段开发前置条件（语义冻结后才决定）
+
+只有本节语义冻结后，才逐项单独决定（每项独立决策、独立评审，不打包）：
+
+1. candidate pool 是否扩展（declared 是否入池，按 11.4 条件逐条核对）。
+2. resource universe 是否修改（`ResourceSource` 第三值、`deriveModelState` declared 分支）。
+3. AI Option state 是否增加 declared 分支（替换 `planner-service` 的 `declared_resource_id === null` 过滤 guard）。
+4. `plan_resource_assignments.resource_source` 是否扩枚举（涉及重建表，单独评估）。
+
+在上述任一决策完成前：不修改 `lib/schema.ts`、`lib/planner/*`、`lib/services/planner-service.ts`、`lib/repositories/*`、`app/api/*`、`components/*`、`scripts/*`；不实现 declared candidate；不重新打开 A/B/C 架构审查。
+
+## 11.8 冻结状态
+
+- 决策 A / B / C / D 冻结于本节；§10 决策 7 四问全部回答完毕，收口。
+- 语义冻结 ≠ 功能交付：declared 入池、state 分支、assignment 枚举扩展均**未实现**，属未实现方向。
+- 本轮无代码 diff、无 schema 改动、无新 API、未运行验证命令、未 git commit。
+
+## 11.9 五方案比较视图 M1 只读评审（同日追加，只读）
+
+**结论：M1 可用现有只读 API 实现 —— GO。零 schema 改动、零新增/修改 API，只新增一个只读视图。3 项阻塞先解决。**
+
+### 已核对的可用端点（均只读存在）
+
+| 用途 | 端点 | 关键行为 |
+| --- | --- | --- |
+| 方案列表（strategy/version/basis） | `GET /projects/[id]/plans` | 返回全部版本 |
+| 阶段标签 | `GET /projects/[id]/stages` | 每项目一次，覆盖所有方案 |
+| AI 模型 + 成本 + 时间（组合方案） | `GET /plans/[id]/assignments` | 行 + `resource_name`/`resource_provider` + `evidenceSummary`；手工方案返回空列表 200 |
+| 任务 + planned 侧（两类方案通用） | `GET /plans/[id]/productivity` | 缺 plan → 404；无执行任务 → 200 且 actual=null；`tasks[]` 含 name/sequence/stageId；`summary.taskCount` |
+| 手工方案 selected option 显示名 | `GET /tasks/[id]/ai-options` | **仅 per-task**，返回 `display_name` |
+| 展开跳转 | `GET /plans/[id]` + 现有详情页 | 不变 |
+
+全仓 `app/api` 清单核对：**无 registry/model API** —— 客户端不能自行把 registry id 解析成名字。
+
+### 阻塞项（3 项，必须先解决）
+
+- **B1 组合方案任务名只能取自 productivity。**
+  `GET /plans/[id]/tasks` 对组合方案返回 `[]`（组合方案从不持有 `project_tasks`，combination-service.ts:332-334）；assignments 只带 `project_task_id`、不含任务名。任务列**必须**以 `GET /plans/[id]/productivity` 的 `tasks[]` 为唯一数据源，否则组合方案任务列全空/裸 id。
+- **B2 手工方案无计划级 AI 模型名来源。**
+  手工方案无 assignments 行；productivity 的 `planned.selectedOption` 只有 `modelId`、无名字；无 registry API 可解析；唯一名字来源是 per-task `GET /tasks/[id]/ai-options`。
+  解法（现有 API）：折叠行显示 `—`，展开时按任务惰性拉取；或直接占位。
+  **阻塞条件**：若设计要求"折叠态、仅用计划级接口显示模型名" → 该设计不可用现有 API 实现（需新聚合端点，超出 M1 范围）。
+- **B3 设计门槛（非 API）：方案级成本合计与 unknown 规则尚未写入设计文档。**
+  必须先冻结：① 只有同币种才求和；② 任一行成本三列 NULL ⇒ 该方案合计 = **unknown**（非部分和、非 0），并标注"含 n 条未定价"；③ 多币种并列展示、不合并单一数字；④ 不排名、不标记最便宜/最贵；⑤ 时间列标注"各方案同源同值，不区分方案"（time-estimator 是 step 属性）；⑥ 效率列显示 `—`（未实现，不推算）。
+  未冻结前实现 = UI 自造规则，违反"不制造虚假精确数据 / 不排名"红线，且返工。
+
+### 非阻塞（已核对）
+
+- 效率列无任何数据源 → 显示 `—`（设计已如此规定）。
+- 缺 2 个策略（最快完成/高质量）→ 视图对 `listProjectPlans` 通用，缺的策略就是缺的行。
+- 同策略多版本 → 客户端取最新，纯 UI。
+- 请求量 ≤ ~6 方案 × 2 端点 + 1 stages（+ 惰性 per-task），本地单用户可接受；聚合端点是 M2 可选优化，不是 M1 前提。
+
+### 边界
+
+- 本轮只读：无代码 diff、无 schema 改动、无新 API、未运行 build/lint/smoke、未 git commit。
+- 本节不改变 §11.7 四项决策的冻结状态与顺序；实现（开发）前仍需 B3 规则先冻结。
+
+## 11.10 五方案比较视图 M1 显示规则冻结
+
+（2026-10-08，只读设计冻结）
+
+五方案比较视图只负责并列展示已有计划事实，不负责推荐、评分或优化决策。
+
+### 1. 成本展示规则
+
+- 成本只允许同币种汇总。
+- 不进行自动汇率转换。
+- 不同币种必须分别展示。
+- 计划成本来源于 assignment / selected option 的 planned cost。
+- 计划成本不是实际消费。
+
+示例：
+
+CNY:
+10 - 20
+
+USD:
+3 - 5
+
+### 2. Unknown 成本规则
+
+若方案中任意任务存在：
+
+- planned_cost_min = NULL
+- planned_cost_max = NULL
+
+则该方案总成本显示：
+
+Unknown
+
+禁止：
+
+- 部分任务求和后作为完整方案成本
+- NULL 当作 0
+- 推测未知价格
+
+### 3. 排名规则
+
+比较视图禁止：
+
+- 最便宜方案
+- 最快方案
+- 推荐方案
+- 性价比排序
+
+原因：
+
+当前 Planner 只有计划数据，没有足够 actual evidence 支撑推荐。
+
+### 4. 时间展示规则
+
+预计时间来自任务估算。
+
+当前估算不区分 AI 模型能力。
+
+因此：
+
+- 展示时间范围
+- 标注时间估算为任务级估计
+- 不解释为模型速度比较
+
+### 5. 效率字段规则
+
+当前没有可靠效率数据：
+
+- cost/task
+- time/task
+- completion rate
+
+因此效率显示：
+
+—
+
+不得推算。
+
+### 6. 多版本规则
+
+同 strategy 存在多个 version 时：
+
+- 默认展示最新 version
+- 历史 version 不参与默认比较
+- 不删除历史数据
+
+### 7. 产品边界
+
+比较视图：
+
+做：
+
+- 展示方案差异
+- 展示成本范围
+- 展示 AI 资源
+- 展示时间估算
+
+不做：
+
+- AI 推荐
+- 自动选择
+- 成本优化评分
+- 模型排名
+
+---
+
+状态（本节冻结后）：§11.9 阻塞 **B3 解除**（显示规则已冻结，实现前不再有设计前置）。
+余下 B1（组合方案任务列取自 productivity）与 B2（手工方案模型名按任务惰性拉取或显示 `—`）
+为既定取数约束，解法已在 §11.9 给定，开发时直接执行即可。本节与 §11.9 同为只读产出，无代码 diff。
+
+---
+
+# 12. 2026-10-08 记录：R3.5 M1 五方案比较视图完成
+
+R3.5 M1 五方案比较视图完成。
+
+## 实现范围
+
+- 方案并列比较
+- 任务数量展示
+- AI resource 展示
+- 时间估算展示
+- planned cost 展示
+- efficiency 占位
+
+实现文件（仅 3 个，无其他代码改动）：
+
+- `app/planner/[projectId]/page.tsx`（Compare plans 卡片，`id="compare"`）
+- `app/planner/[projectId]/plans/[planId]/page.tsx`（面包屑 "Compare plans →" 回链）
+- `components/planner/plan-productivity.tsx`（导出 `costRangeText` / `minutesRangeText` / `TaskProductivityRow`，逻辑零改动）
+
+## 严格遵守 §11.10
+
+- 不推荐
+- 不排名
+- 不评分
+- 不自动选择
+- 不汇率转换
+- 不制造效率数据
+
+行为核对：默认每 strategy 只显示最新 version（历史版本需勾选）；成本只按币种分组展示、任一任务 planned cost NULL ⇒ 方案总成本 `Unknown`（不当 0、不做部分和）；时间为任务级估算并加脚注说明不区分模型速度；Efficiency 恒为 `—`；表格顺序为固定分组顺序（手工在前），不做任何成本排序。
+
+## 数据来源
+
+- productivity API
+- assignments API
+- existing ai-options API
+
+无：
+
+- schema 修改
+- 新 API
+- 新数据库字段
+
+## 验证
+
+- TypeScript PASS（`npx tsc --noEmit`）
+- ESLint PASS（M1 三个文件 0 findings；全仓 435 errors 为既有基线，与 M1 无关）
+- Build PASS（`npm run build`，25/25 页面生成）
+- 浏览器验证 23/23 PASS：加载、默认最新 version、成本/时间/效率规则、无排名语言、组合方案 AI 来自 assignments（3/3 named）、手工方案 selected option 惰性加载、historical 开关（3 行 ↔ 5 行）、详情页回链、0 console error
+
+## 状态
+
+M1 完成。
+
+## 下一阶段
+
+进入 Phase 5 商业价值闭环收尾：
+
+- 发布前检查
+- 免费试用策略落地设计
+- Free / Paid 功能边界冻结
+- MVP 发布准备

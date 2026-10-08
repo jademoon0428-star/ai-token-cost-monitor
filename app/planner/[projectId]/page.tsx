@@ -6,10 +6,19 @@ import {
   useRouter,
 } from "next/navigation";
 import {
+  Fragment,
   useEffect,
   useState,
 } from "react";
 
+import {
+  costRangeText,
+  minutesRangeText,
+} from "@/components/planner/plan-productivity";
+import type {
+  PlanProductivityReport,
+  TaskProductivityRow,
+} from "@/components/planner/plan-productivity";
 import ProjectStages from "@/components/planner/project-stages";
 
 type ProjectRow = {
@@ -184,6 +193,200 @@ const inputStyle = {
   fontSize: 14,
 };
 
+const tableHeaderCellStyle = {
+  textAlign: "left" as const,
+  padding: "8px 10px",
+  fontSize: 12,
+  fontWeight: 700,
+  color: "#666",
+  borderBottom: "1px solid #e7ebf0",
+  whiteSpace: "nowrap" as const,
+};
+
+const tableCellStyle = {
+  padding: "10px",
+  verticalAlign: "top" as const,
+  borderBottom: "1px solid #f0f1f4",
+};
+
+type ComparisonAssignmentRow = {
+  project_task_id: string;
+  resource_name: string | null;
+  resource_provider: string | null;
+  resource_source: string;
+  registry_model_id: string | null;
+  ai_resource_id: string | null;
+};
+
+type ComparisonEntry = {
+  report: PlanProductivityReport;
+  assignments: ComparisonAssignmentRow[];
+};
+
+type ComparisonReportResponse = PlanProductivityReport & {
+  ok?: boolean;
+  error?: string;
+};
+
+type ComparisonAssignmentsResponse = {
+  ok?: boolean;
+  error?: string;
+  items?: ComparisonAssignmentRow[];
+};
+
+function readComparisonJson<T>(
+  pending: Promise<Response>
+): Promise<{ response: Response; data: T | null }> {
+  return pending.then((response) =>
+    response
+      .json()
+      .catch(() => null)
+      .then((data) => ({
+        response,
+        data: data as T | null,
+      }))
+  );
+}
+
+function latestVersionPerStrategy(
+  plans: ProjectPlanRow[]
+): ProjectPlanRow[] {
+  const latest = new Map<string, ProjectPlanRow>();
+
+  for (const plan of plans) {
+    const current = latest.get(plan.strategy);
+
+    if (!current || plan.version > current.version) {
+      latest.set(plan.strategy, plan);
+    }
+  }
+
+  return plans.filter(
+    (plan) => latest.get(plan.strategy) === plan
+  );
+}
+
+function orderedComparisonPlans(
+  plans: ProjectPlanRow[]
+): ProjectPlanRow[] {
+  return [
+    ...plans.filter((plan) => !isCombinationPlan(plan)),
+    ...plans.filter((plan) => isCombinationPlan(plan)),
+  ];
+}
+
+function comparisonResourceLabel(
+  row: ComparisonAssignmentRow
+): string {
+  if (row.resource_name !== null) {
+    return row.resource_provider !== null
+      ? `${row.resource_provider} · ${row.resource_name}`
+      : row.resource_name;
+  }
+
+  return row.resource_source === "registry"
+    ? `Registry model ${row.registry_model_id}`
+    : `Registered resource ${row.ai_resource_id}`;
+}
+
+function planCostTotals(report: PlanProductivityReport): {
+  unknown: boolean;
+  ranges: { currency: string; min: number; max: number }[];
+} {
+  const byCurrency = new Map<
+    string,
+    { min: number; max: number }
+  >();
+
+  for (const task of report.tasks) {
+    const assignment = task.planned.assignment;
+    const selectedOption = task.planned.selectedOption;
+
+    const min =
+      assignment !== null
+        ? assignment.plannedCostMicros.min
+        : selectedOption !== null
+          ? selectedOption.estimatedCostMicros.min
+          : null;
+    const max =
+      assignment !== null
+        ? assignment.plannedCostMicros.max
+        : selectedOption !== null
+          ? selectedOption.estimatedCostMicros.max
+          : null;
+    const currency =
+      assignment !== null
+        ? assignment.plannedCostCurrency
+        : selectedOption !== null
+          ? selectedOption.estimatedCostCurrency
+          : null;
+
+    if (
+      min === null ||
+      max === null ||
+      currency === null
+    ) {
+      return { unknown: true, ranges: [] };
+    }
+
+    const current = byCurrency.get(currency) ?? {
+      min: 0,
+      max: 0,
+    };
+
+    current.min += min;
+    current.max += max;
+    byCurrency.set(currency, current);
+  }
+
+  return {
+    unknown: false,
+    ranges: [...byCurrency.entries()]
+      .sort(([left], [right]) =>
+        left.localeCompare(right)
+      )
+      .map(([currency, range]) => ({
+        currency,
+        min: range.min,
+        max: range.max,
+      })),
+  };
+}
+
+function planTimeTotals(report: PlanProductivityReport): {
+  unknown: boolean;
+  min: number;
+  max: number;
+} {
+  let min = 0;
+  let max = 0;
+
+  for (const task of report.tasks) {
+    const assignment = task.planned.assignment;
+    const selectedOption = task.planned.selectedOption;
+
+    const range =
+      assignment !== null
+        ? assignment.plannedTimeMinutes
+        : selectedOption !== null
+          ? selectedOption.estimatedTimeMinutes
+          : null;
+
+    if (
+      range === null ||
+      range.min === null ||
+      range.max === null
+    ) {
+      return { unknown: true, min: 0, max: 0 };
+    }
+
+    min += range.min;
+    max += range.max;
+  }
+
+  return { unknown: false, min, max };
+}
+
 const readJson = (
   response: Response
 ): Promise<{
@@ -239,6 +442,27 @@ export default function ProjectDetailPage() {
     string | null
   >(null);
 
+  const [compareRequested, setCompareRequested] =
+    useState(false);
+  const [comparisonReloadKey, setComparisonReloadKey] =
+    useState(0);
+  const [comparison, setComparison] = useState<
+    Record<string, ComparisonEntry> | null
+  >(null);
+  const [comparisonLoading, setComparisonLoading] =
+    useState(false);
+  const [comparisonError, setComparisonError] = useState<
+    string | null
+  >(null);
+  const [showHistorical, setShowHistorical] = useState(false);
+  const [expandedPlanId, setExpandedPlanId] = useState<
+    string | null
+  >(null);
+  const [selectedOptionNames, setSelectedOptionNames] =
+    useState<Record<string, string | null>>({});
+  const [optionNamesLoading, setOptionNamesLoading] =
+    useState(false);
+
   const strategy =
     strategyChoice ??
     (STRATEGIES.includes(
@@ -252,6 +476,12 @@ export default function ProjectDetailPage() {
   );
   const combinationPlans = plans.filter(
     (plan) => isCombinationPlan(plan)
+  );
+
+  const comparisonPlans = orderedComparisonPlans(
+    showHistorical
+      ? plans
+      : latestVersionPerStrategy(plans)
   );
 
   useEffect(() => {
@@ -495,6 +725,232 @@ export default function ProjectDetailPage() {
     } finally {
       setGeneratingCombinations(false);
     }
+  }
+
+  useEffect(() => {
+    if (!compareRequested || missingId) {
+      return;
+    }
+
+    let cancelled = false;
+    const targets = showHistorical
+      ? plans
+      : latestVersionPerStrategy(plans);
+
+    Promise.all(
+      targets.map(async (plan) => {
+        const [reportResult, assignmentsResult] =
+          await Promise.all([
+            readComparisonJson<ComparisonReportResponse>(
+              fetch(
+                `/api/planner/plans/${plan.id}/productivity`,
+                { cache: "no-store" }
+              )
+            ),
+            readComparisonJson<ComparisonAssignmentsResponse>(
+              fetch(
+                `/api/planner/plans/${plan.id}/assignments`,
+                { cache: "no-store" }
+              )
+            ),
+          ]);
+
+        if (
+          !reportResult.response.ok ||
+          !reportResult.data?.ok ||
+          !reportResult.data.plan ||
+          !Array.isArray(reportResult.data.tasks)
+        ) {
+          throw new Error(
+            typeof reportResult.data?.error === "string"
+              ? reportResult.data.error
+              : `Failed to load plan v${plan.version} (${reportResult.response.status})`
+          );
+        }
+
+        if (
+          !assignmentsResult.response.ok ||
+          !assignmentsResult.data?.ok ||
+          !Array.isArray(assignmentsResult.data.items)
+        ) {
+          throw new Error(
+            typeof assignmentsResult.data?.error ===
+              "string"
+              ? assignmentsResult.data.error
+              : `Failed to load plan v${plan.version} assignments (${assignmentsResult.response.status})`
+          );
+        }
+
+        return [
+          plan.id,
+          {
+            report: reportResult.data,
+            assignments: assignmentsResult.data.items,
+          },
+        ] as const;
+      })
+    )
+      .then((entries) => {
+        if (cancelled) {
+          return;
+        }
+
+        setComparison(Object.fromEntries(entries));
+        setSelectedOptionNames({});
+        setExpandedPlanId(null);
+        setComparisonError(null);
+      })
+      .catch((cause) => {
+        if (cancelled) {
+          return;
+        }
+
+        setComparisonError(
+          cause instanceof Error
+            ? cause.message
+            : "Failed to load plan comparison"
+        );
+      })
+      .finally(() => {
+        if (cancelled) {
+          return;
+        }
+
+        setComparisonLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    compareRequested,
+    missingId,
+    plans,
+    showHistorical,
+    comparisonReloadKey,
+  ]);
+
+  function handleCompare() {
+    setComparisonLoading(true);
+    setComparisonError(null);
+
+    if (compareRequested) {
+      setComparisonReloadKey((key) => key + 1);
+    } else {
+      setCompareRequested(true);
+    }
+  }
+
+  function loadSelectedOptionNames(
+    planId: string,
+    report: PlanProductivityReport
+  ) {
+    const missing = report.tasks.filter(
+      (task) =>
+        task.planned.selectedOption !== null &&
+        !(`${planId}:${task.projectTaskId}` in
+          selectedOptionNames)
+    );
+
+    if (missing.length === 0) {
+      return;
+    }
+
+    setOptionNamesLoading(true);
+
+    Promise.all(
+      missing.map(async (task) => {
+        try {
+          const response = await fetch(
+            `/api/planner/tasks/${task.projectTaskId}/ai-options`,
+            { cache: "no-store" }
+          );
+          const data = await response
+            .json()
+            .catch(() => null);
+
+          if (
+            !response.ok ||
+            !data?.ok ||
+            !Array.isArray(data.items)
+          ) {
+            return [task.projectTaskId, null] as const;
+          }
+
+          const selected = data.items.find(
+            (item: { is_selected?: number }) =>
+              item.is_selected === 1
+          );
+          const name =
+            selected &&
+            typeof selected.display_name === "string" &&
+            selected.display_name !== ""
+              ? selected.display_name
+              : null;
+
+          return [task.projectTaskId, name] as const;
+        } catch {
+          return [task.projectTaskId, null] as const;
+        }
+      })
+    ).then((entries) => {
+      setSelectedOptionNames((previous) => {
+        const next = { ...previous };
+
+        for (const [taskId, name] of entries) {
+          next[`${planId}:${taskId}`] = name;
+        }
+
+        return next;
+      });
+      setOptionNamesLoading(false);
+    });
+  }
+
+  function toggleComparisonRow(
+    plan: ProjectPlanRow,
+    entry: ComparisonEntry
+  ) {
+    if (expandedPlanId === plan.id) {
+      setExpandedPlanId(null);
+
+      return;
+    }
+
+    setExpandedPlanId(plan.id);
+
+    if (!isCombinationPlan(plan)) {
+      loadSelectedOptionNames(plan.id, entry.report);
+    }
+  }
+
+  function taskResourceLabel(
+    plan: ProjectPlanRow,
+    task: TaskProductivityRow,
+    assignments: ComparisonAssignmentRow[]
+  ): string {
+    if (isCombinationPlan(plan)) {
+      const row = assignments.find(
+        (item) =>
+          item.project_task_id === task.projectTaskId
+      );
+
+      return row === undefined
+        ? "—"
+        : comparisonResourceLabel(row);
+    }
+
+    if (task.planned.selectedOption === null) {
+      return "—";
+    }
+
+    const key = `${plan.id}:${task.projectTaskId}`;
+
+    if (!(key in selectedOptionNames)) {
+      return optionNamesLoading ? "…" : "—";
+    }
+
+    return selectedOptionNames[key] ?? "—";
   }
 
   return (
@@ -973,6 +1429,609 @@ export default function ProjectDetailPage() {
                   </div>
                 ) : null}
               </div>
+            )}
+          </div>
+
+          <div
+            id="compare"
+            style={{
+              ...cardStyle,
+              marginTop: 18,
+            }}
+          >
+            <h2
+              style={{
+                fontSize: 16,
+                margin: "0 0 8px",
+              }}
+            >
+              Compare plans
+            </h2>
+
+            <p
+              style={{
+                margin: "0 0 14px",
+                color: "#666",
+                fontSize: 14,
+                lineHeight: 1.5,
+              }}
+            >
+              Side-by-side facts from the plan versions:
+              tasks, AI resources, estimated time and
+              planned cost. Nothing is ranked, scored or
+              recommended, and no currency is ever
+              converted.
+            </p>
+
+            {plans.length === 0 ? (
+              <p
+                style={{
+                  margin: 0,
+                  color: "#666",
+                  fontSize: 14,
+                  lineHeight: 1.5,
+                }}
+              >
+                No plan versions yet.
+              </p>
+            ) : (
+              <>
+                <div
+                  style={{
+                    display: "flex",
+                    flexWrap: "wrap",
+                    gap: 14,
+                    alignItems: "center",
+                    marginBottom: 14,
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={handleCompare}
+                    disabled={comparisonLoading}
+                    style={{
+                      padding: "10px 16px",
+                      borderRadius: 8,
+                      border: 0,
+                      background: "#172033",
+                      color: "#fff",
+                      fontSize: 14,
+                      fontWeight: 700,
+                      cursor: comparisonLoading
+                        ? "default"
+                        : "pointer",
+                      opacity: comparisonLoading
+                        ? 0.6
+                        : 1,
+                    }}
+                  >
+                    {comparisonLoading
+                      ? "Loading comparison…"
+                      : comparisonError
+                        ? "Retry"
+                        : compareRequested
+                          ? "Refresh comparison"
+                          : "Compare plans"}
+                  </button>
+
+                  <label
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 7,
+                      fontSize: 13,
+                      color: "#444",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={showHistorical}
+                      disabled={comparisonLoading}
+                      onChange={(event) => {
+                        setShowHistorical(
+                          event.target.checked
+                        );
+
+                        if (compareRequested) {
+                          setComparisonLoading(true);
+                          setExpandedPlanId(null);
+                        }
+                      }}
+                    />
+                    Show historical versions
+                  </label>
+                </div>
+
+                {comparisonError ? (
+                  <p
+                    role="alert"
+                    style={{
+                      margin: "0 0 12px",
+                      color: "#b42318",
+                      fontSize: 14,
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    {comparisonError}
+                  </p>
+                ) : null}
+
+                {compareRequested &&
+                comparison !== null &&
+                comparisonError === null &&
+                !comparisonLoading ? (
+                  comparisonPlans.length === 0 ? (
+                    <p
+                      style={{
+                        margin: 0,
+                        color: "#666",
+                        fontSize: 14,
+                        lineHeight: 1.5,
+                      }}
+                    >
+                      Nothing to compare yet.
+                    </p>
+                  ) : (
+                    <>
+                      <div
+                        style={{
+                          overflowX: "auto",
+                        }}
+                      >
+                        <table
+                          style={{
+                            width: "100%",
+                            minWidth: 680,
+                            borderCollapse: "collapse",
+                            fontSize: 14,
+                          }}
+                        >
+                          <thead>
+                            <tr>
+                              <th
+                                style={
+                                  tableHeaderCellStyle
+                                }
+                              >
+                                Plan
+                              </th>
+                              <th
+                                style={
+                                  tableHeaderCellStyle
+                                }
+                              >
+                                Tasks
+                              </th>
+                              <th
+                                style={
+                                  tableHeaderCellStyle
+                                }
+                              >
+                                AI resources
+                              </th>
+                              <th
+                                style={
+                                  tableHeaderCellStyle
+                                }
+                              >
+                                Estimated time
+                              </th>
+                              <th
+                                style={
+                                  tableHeaderCellStyle
+                                }
+                              >
+                                Planned cost
+                              </th>
+                              <th
+                                style={
+                                  tableHeaderCellStyle
+                                }
+                              >
+                                Efficiency
+                              </th>
+                            </tr>
+                          </thead>
+
+                          <tbody>
+                            {comparisonPlans.map(
+                              (plan) => {
+                                const entry =
+                                  comparison[plan.id];
+
+                                if (!entry) {
+                                  return null;
+                                }
+
+                                const cost =
+                                  planCostTotals(
+                                    entry.report
+                                  );
+                                const time =
+                                  planTimeTotals(
+                                    entry.report
+                                  );
+                                const taskCount =
+                                  entry.report.summary
+                                    .taskCount;
+                                const isExpanded =
+                                  expandedPlanId ===
+                                  plan.id;
+                                const resourceLabels = [
+                                  ...new Set(
+                                    entry.assignments.map(
+                                      comparisonResourceLabel
+                                    )
+                                  ),
+                                ];
+
+                                return (
+                                  <Fragment
+                                    key={plan.id}
+                                  >
+                                    <tr
+                                      onClick={() =>
+                                        toggleComparisonRow(
+                                          plan,
+                                          entry
+                                        )
+                                      }
+                                      style={{
+                                        cursor:
+                                          "pointer",
+                                      }}
+                                    >
+                                      <td
+                                        style={
+                                          tableCellStyle
+                                        }
+                                      >
+                                        <Link
+                                          href={`/planner/${projectId}/plans/${plan.id}`}
+                                          onClick={(
+                                            event
+                                          ) =>
+                                            event.stopPropagation()
+                                          }
+                                          style={{
+                                            color:
+                                              "#111",
+                                            fontWeight: 600,
+                                            textDecoration:
+                                              "none",
+                                          }}
+                                        >
+                                          v
+                                          {
+                                            plan.version
+                                          }
+                                        </Link>
+
+                                        <div
+                                          style={{
+                                            fontSize: 12,
+                                            color: "#666",
+                                            marginTop: 3,
+                                          }}
+                                        >
+                                          {PLAN_STRATEGY_LABELS[
+                                            plan
+                                              .strategy
+                                          ] ??
+                                            plan.strategy}
+                                          {" · "}
+                                          {formatDate(
+                                            plan.created_at
+                                          )}
+                                        </div>
+                                      </td>
+
+                                      <td
+                                        style={
+                                          tableCellStyle
+                                        }
+                                      >
+                                        {taskCount}
+                                      </td>
+
+                                      <td
+                                        style={
+                                          tableCellStyle
+                                        }
+                                      >
+                                        {resourceLabels.length >
+                                        0
+                                          ? resourceLabels.join(
+                                              ", "
+                                            )
+                                          : "—"}
+                                      </td>
+
+                                      <td
+                                        style={
+                                          tableCellStyle
+                                        }
+                                      >
+                                        {taskCount ===
+                                        0
+                                          ? "—"
+                                          : time.unknown
+                                            ? "Unknown"
+                                            : `${time.min} – ${time.max} min`}
+                                      </td>
+
+                                      <td
+                                        style={
+                                          tableCellStyle
+                                        }
+                                      >
+                                        {taskCount ===
+                                        0 ? (
+                                          "—"
+                                        ) : cost.unknown ? (
+                                          "Unknown"
+                                        ) : (
+                                          <div
+                                            style={{
+                                              display:
+                                                "grid",
+                                              gap: 3,
+                                            }}
+                                          >
+                                            {cost.ranges.map(
+                                              (
+                                                range
+                                              ) => (
+                                                <span
+                                                  key={
+                                                    range.currency
+                                                  }
+                                                >
+                                                  {`${range.currency}: ${formatMicros(range.min)} – ${formatMicros(range.max)}`}
+                                                </span>
+                                              )
+                                            )}
+                                          </div>
+                                        )}
+                                      </td>
+
+                                      <td
+                                        style={
+                                          tableCellStyle
+                                        }
+                                      >
+                                        —
+                                      </td>
+                                    </tr>
+
+                                    {isExpanded ? (
+                                      <tr>
+                                        <td
+                                          colSpan={6}
+                                          style={{
+                                            ...tableCellStyle,
+                                            background:
+                                              "#fafbfc",
+                                          }}
+                                        >
+                                          <div
+                                            style={{
+                                              display:
+                                                "grid",
+                                              gap: 8,
+                                            }}
+                                          >
+                                            {entry.report.tasks.map(
+                                              (
+                                                task
+                                              ) => {
+                                                const assignment =
+                                                  task
+                                                    .planned
+                                                    .assignment;
+                                                const selectedOption =
+                                                  task
+                                                    .planned
+                                                    .selectedOption;
+
+                                                const costText =
+                                                  assignment !==
+                                                  null
+                                                    ? costRangeText(
+                                                        assignment.plannedCostMicros.min,
+                                                        assignment.plannedCostMicros.max,
+                                                        assignment.plannedCostCurrency
+                                                      )
+                                                    : selectedOption !==
+                                                        null
+                                                      ? costRangeText(
+                                                          selectedOption.estimatedCostMicros.min,
+                                                          selectedOption.estimatedCostMicros.max,
+                                                          selectedOption.estimatedCostCurrency
+                                                        )
+                                                      : "Unknown";
+
+                                                const timeText =
+                                                  assignment !==
+                                                  null
+                                                    ? minutesRangeText(
+                                                        assignment.plannedTimeMinutes.min,
+                                                        assignment.plannedTimeMinutes.max
+                                                      )
+                                                    : selectedOption !==
+                                                        null
+                                                      ? minutesRangeText(
+                                                          selectedOption.estimatedTimeMinutes.min,
+                                                          selectedOption.estimatedTimeMinutes.max
+                                                        )
+                                                      : "Unknown";
+
+                                                return (
+                                                  <div
+                                                    key={
+                                                      task.projectTaskId
+                                                    }
+                                                    style={{
+                                                      display:
+                                                        "flex",
+                                                      flexWrap:
+                                                        "wrap",
+                                                      gap: 12,
+                                                      fontSize: 13,
+                                                      color:
+                                                        "#333",
+                                                    }}
+                                                  >
+                                                    <span
+                                                      style={{
+                                                        fontWeight: 600,
+                                                      }}
+                                                    >
+                                                      {
+                                                        task.sequence
+                                                      }
+                                                      .{" "}
+                                                      {
+                                                        task.name
+                                                      }
+                                                    </span>
+
+                                                    <span
+                                                      style={{
+                                                        color:
+                                                          "#666",
+                                                      }}
+                                                    >
+                                                      AI:{" "}
+                                                      {taskResourceLabel(
+                                                        plan,
+                                                        task,
+                                                        entry.assignments
+                                                      )}
+                                                    </span>
+
+                                                    <span
+                                                      style={{
+                                                        color:
+                                                          "#666",
+                                                      }}
+                                                    >
+                                                      Cost:{" "}
+                                                      {costText}
+                                                    </span>
+
+                                                    <span
+                                                      style={{
+                                                        color:
+                                                          "#666",
+                                                      }}
+                                                    >
+                                                      Time:{" "}
+                                                      {timeText}
+                                                    </span>
+                                                  </div>
+                                                );
+                                              }
+                                            )}
+
+                                            {isCombinationPlan(
+                                              plan
+                                            ) ? null : (
+                                              <p
+                                                style={{
+                                                  margin: 0,
+                                                  fontSize: 12,
+                                                  color:
+                                                    "#666",
+                                                  lineHeight: 1.5,
+                                                }}
+                                              >
+                                                AI names
+                                                come
+                                                from
+                                                each
+                                                step&apos;s
+                                                selected
+                                                option;
+                                                “—”
+                                                means no
+                                                selected
+                                                option
+                                                exists
+                                                for that
+                                                step.
+                                              </p>
+                                            )}
+                                          </div>
+                                        </td>
+                                      </tr>
+                                    ) : null}
+                                  </Fragment>
+                                );
+                              }
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      <div
+                        style={{
+                          marginTop: 12,
+                          display: "grid",
+                          gap: 6,
+                          fontSize: 12,
+                          color: "#666",
+                          lineHeight: 1.6,
+                        }}
+                      >
+                        <span>
+                          Planned cost is an estimate,
+                          not actual spend. Costs are
+                          summed per currency and never
+                          converted. “Unknown” means at
+                          least one task in the plan has
+                          no price.
+                        </span>
+
+                        <span>
+                          Estimated time is a task-level
+                          estimate; the current
+                          estimator does not
+                          distinguish model speed, so
+                          time does not compare AI
+                          models.
+                        </span>
+
+                        <span>
+                          Efficiency shows “—”: there is
+                          no reliable efficiency data
+                          yet (cost/task, time/task,
+                          completion rate).
+                        </span>
+
+                        <span>
+                          Facts only — no
+                          recommendation, no ranking,
+                          no automatic selection.
+                        </span>
+                      </div>
+                    </>
+                  )
+                ) : compareRequested &&
+                  comparisonLoading ? (
+                  <p
+                    style={{
+                      margin: 0,
+                      color: "#666",
+                      fontSize: 14,
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    Loading comparison…
+                  </p>
+                ) : null}
+              </>
             )}
           </div>
         </>

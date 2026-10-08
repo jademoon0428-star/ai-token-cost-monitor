@@ -1055,6 +1055,22 @@ export default function PlanDetailPage() {
         </Link>
 
         <Link
+          href={
+            projectId
+              ? `/planner/${projectId}#compare`
+              : "/planner"
+          }
+          style={{
+            color: "#555",
+            textDecoration: "none",
+            fontSize: 14,
+            fontWeight: 600,
+          }}
+        >
+          Compare plans →
+        </Link>
+
+        <Link
           href="/planner"
           style={{
             color: "#555",

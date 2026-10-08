@@ -6,7 +6,10 @@ import type {
   TaskProductivityRow,
 } from "@/lib/services/productivity-service";
 
-export type { PlanProductivityReport };
+export type {
+  PlanProductivityReport,
+  TaskProductivityRow,
+};
 
 /*
  * R3.5-B: read-only AI Productivity display for one plan.
@@ -69,7 +72,7 @@ function rangeText(
   return `${formatNumber(min)} – ${formatNumber(max)}`;
 }
 
-function costRangeText(
+export function costRangeText(
   min: number | null,
   max: number | null,
   currency: string | null
@@ -85,7 +88,7 @@ function costRangeText(
   return `${formatMicros(min)} – ${formatMicros(max)} ${currency}`;
 }
 
-function minutesRangeText(
+export function minutesRangeText(
   min: number | null,
   max: number | null
 ): string {
