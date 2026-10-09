@@ -110,6 +110,9 @@ const aiResourceRepository = await import(
 const { generateProjectPlanCombinations } = await import(
   "../lib/planner/combination-service.ts"
 );
+const { startCommercialTrial } = await import(
+  "../lib/services/commercial-service.ts"
+);
 const { estimatePlannerCost } = await import(
   "../lib/planner/cost-estimator.ts"
 );
@@ -209,6 +212,14 @@ function insertPricing(id, modelName, input, output) {
 }
 
 initDb();
+
+/*
+ * Both generation entry points are gated by the 90-day full-access
+ * window, so the isolated database starts its own trial here - after
+ * initDb, before the first generation call.
+ */
+startCommercialTrial();
+
 
 getDb()
   .prepare(

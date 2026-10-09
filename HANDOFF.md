@@ -2,6 +2,10 @@
 
 更新时间：
 
+2026-10-09（第十三更新：Commercial 生命周期 + Planner Advanced service 层门禁 + 402 映射 + 4 个 planner smoke 修复整理为待提交批次（16 个文件：5 生产 + 4 smoke + 3 文档 + 4 个 commercial 新增文件），见第十六节；本轮仅整理边界，不执行 commit）
+
+2026-10-08（第十一更新：Phase 5 产品化收口完成，commit `80cd7a7`（仅 5 个源码文件，112+/13-），空态/错误态 5 项改进，见第十五节；文档仅本地更新，不提交）
+
 2026-10-08（第十更新：R3.5 M1 五方案比较视图代码完成并验证（TypeScript/ESLint/Build/浏览器 23 项 PASS），文档同步，见第十四节；3 代码文件 + 3 文档提交）
 
 2026-10-08（第九更新：五方案比较视图 M1 显示规则冻结为方向文档 §11.10，阻塞 B3 解除，见第十三节；仅改 3 份文档，无代码改动）
@@ -811,3 +815,168 @@ R3.5 M1 五方案比较视图完成。
 2. 免费试用策略落地设计
 3. Free / Paid 功能边界冻结
 4. MVP 发布准备
+
+
+================================================
+十五、2026-10-08 收官：Phase 5 产品化收口（发布就绪审查 + 空态/错误态修复）
+================================================
+
+
+## 1. 发布就绪审查（只读）
+
+- 产出 PHASE5_RELEASE_READINESS_REVIEW.md（未跟踪，不入 Git）。
+- 结论：Conditional GO —— 核心价值闭环完整、无死链、无调试残留、新装数据安全；
+  发布前小修清单见该文档 §4。
+- Free/Paid 边界草案见该文档 §7（仅为草案，未冻结、未实现）。
+
+
+## 2. 本批次已提交内容
+
+commit：`80cd7a7` fix: improve empty and error states
+统计：112 insertions, 13 deletions，仅 5 个源码文件：
+
+- app/ai-activity/page.tsx —— 增加数据加载失败 error state（成功清除、
+  失败用户可见、保留 console.error、polling 不变）。
+- app/saving/page.tsx —— 无模型消费数据时显示明确 empty state。
+- app/page.tsx —— Task Session 两处 catch 不再暴露原始错误信息，
+  固定文案 "Unable to load task session state." / "Unable to complete task action."。
+- app/usage/details/page.tsx —— 区分"完全没有 usage 数据"（No usage records yet.
+  + Import official usage export 入口）与"当前筛选无匹配"（保留原文案）。
+- app/budget/page.tsx —— 无 verified cost 时显示 empty state + 导入入口；
+  未设置 budget 时提示显示的是 suggested values。
+
+
+## 3. 验证
+
+- `npx tsc --noEmit` PASS
+- `npm run build` PASS（25/25 页面）
+- scoped ESLint：本批次涉及的页面 PASS；usage/details 的 1 个
+  react-hooks/set-state-in-effect error 已核实为 HEAD 基线既有，非本批次引入。
+
+
+## 4. 边界与状态
+
+- 无 API / schema / service / repository / Planner 改动；无文档外源码改动。
+- 当前工作区无源码修改。
+- 未跟踪文件保持本地、不加入 Git：`=`、PHASE5_RELEASE_READINESS_REVIEW.md、
+  PLANNER_STAGE_AND_TASK_MODEL_DESIGN.md、PROJECT_PROGRESS_TIMELINE.md、
+  PROJECT_WORKING_AGREEMENT.md。
+- v1.5.4 release/tag 冻结不变；未 push；未创建新 commit（文档更新仅本地）。
+
+
+## 5. 下一阶段
+
+Phase 5 后续（按方向文档 §11 收尾清单，等待用户逐项决策）：
+
+1. 免费试用策略落地设计
+2. Free / Paid 功能边界冻结
+3. MVP 发布准备（发布工程：CHANGELOG 版本条目、PROJECT_STATUS 刷新、
+   全量 smoke、打包产物检查）
+
+
+==================================================
+十六、2026-10-08 收官：Commercial 生命周期接入完成 + Planner Advanced 只读边界审查
+==================================================
+
+
+## 1. Commercial 生命周期基础层（已完成，待提交）
+
+90-Day Full Access 商业模式落地，6 个冻结 capability：
+
+planner_advanced、cost_advanced、budget_control、ai_activity_advanced、
+productivity_efficiency、planner_historical_efficiency。
+
+新增 3 个文件（lib/schema.ts 仅 +9 行）：
+
+- lib/schema.ts：commercial_state singleton 表，first_use_at 可空。
+- lib/repositories/commercial-repository.ts：ensureCommercialStateRow 只建行
+  不写 first_use；stampCommercialFirstUse 原子
+  `UPDATE … WHERE first_use_at IS NULL`。
+- lib/services/commercial-service.ts：startCommercialTrial() 为唯一写入口；
+  getCommercialLifecycle() 纯读，first_use_at 为 NULL 时返回 null
+  （未开始，不擅自开始试用）；evaluateCommercialCapabilities /
+  isCommercialCapabilityAllowed / setCommercialPaid 同步遵循 null 语义。
+- scripts/smoke-commercial-lifecycle.mjs：25/25 PASS（含 90 天边界、
+  幂等重复 start、生产 DB 快照零变化）。
+
+关键认知（冻结）：
+
+- commercial_state 表存在 ≠ 试用开始（dev 启动时 initDb 会建空表）。
+- first_use_at IS NOT NULL 才代表商业生命周期开始。
+
+
+## 2. Dashboard 首次使用接入（已完成，待提交）
+
+- 新增 app/api/commercial/start/route.ts：POST，runtime=nodejs、
+  dynamic=force-dynamic，Server 侧执行 startCommercialTrial()，
+  异常返回通用 500 文案（不暴露内部错误）。
+- app/page.tsx +6 行独立挂载 effect：fire-and-forget
+  `void fetch("/api/commercial/start", { method: "POST" }).catch(() => null)`。
+- 排除项确认：不放 layout / instrumentation / initDb / usage import /
+  SSR / 后台服务；不接付费判定。
+
+验证（Playwright 真实浏览器实测）：
+
+- 首次打开 Dashboard 写入 first_use_at=2026-10-08T14:03:08.834Z，
+  paid=0、paid_at=null、lifecycleState=full_access_trial、
+  paidRequiredAt=2027-01-06（恰好 +90×24h）。
+- reload 后全部字段逐字节不变；StrictMode 双 POST 幂等（4 次全 200）。
+- 21 张业务表计数零漂移。
+- tsc PASS、scoped ESLint（2 文件）PASS、git diff --check CLEAN。
+
+
+## 3. Planner Advanced 边界（结论冻结，service 层已实现待提交）
+
+planner_advanced 不覆盖整个 Planner，只含 2 个生成型 service 函数：
+
+1. generateProjectPlanCombinations()（lib/planner/combination-service.ts）
+   ← POST /api/planner/projects/[id]/combinations（多方案组合生成）。
+2. generateProjectTaskAiOptions()（lib/services/planner-service.ts）
+   ← POST /api/planner/tasks/[id]/ai-options/generate（Task AI Options 生成）。
+
+免费保留（不拦）：项目创建、阶段 CRUD、计划版本创建、任务 CRUD、
+AI options 查询/手动创建/select、已生成历史读取、
+productivity/M1 报告（属其他 capability）。
+
+技术方案（冻结）：权限检查放 service 层，不放 route 层——两个生成函数是
+唯一入口、防未来调用方绕过、route 保持薄壳、免费功能零影响。
+拒绝码 PLANNER_ADVANCED_LOCKED → HTTP 402。
+
+smoke 影响：smoke-planner-api 不触达上述 2 个端点，零回归。
+
+
+## 4. 边界与状态（2026-10-09 更新：commit 前整理完成，待提交）
+
+- 即将提交共 16 个文件：5 个生产源码（lib/schema.ts、lib/services/planner-service.ts、
+  lib/planner/combination-service.ts、lib/planner-api-errors.ts、app/page.tsx）、
+  4 个新增 commercial 文件（lib/services/commercial-service.ts、
+  lib/repositories/commercial-repository.ts、app/api/commercial/start/route.ts、
+  scripts/smoke-commercial-lifecycle.mjs）、4 个 smoke-planner-*.mjs、3 份文档
+  （HANDOFF.md / PROJECT_DAILY_LOG.md / PROJECT_DIRECTION_AND_DECISIONS.md）。
+- smoke 修复（本轮授权）：4 个脚本 initDb 后调用 startCommercialTrial()；
+  persistence 重写 API 面断言；combination/evidence 哈希断言改为运行前后实测比较；
+  evidence check 同步化（24 passed 与日志一致）。
+- 未 commit、未 push；HEAD 仍为 `80cd7a7`。
+- v1.5.4 release/tag 冻结不变；未改 package.json；未接付费判定。
+- 0 字节垃圾文件 `=` 已删除；PHASE5_RELEASE_READINESS_REVIEW.md、
+  PLANNER_STAGE_AND_TASK_MODEL_DESIGN.md、PROJECT_PROGRESS_TIMELINE.md、
+  PROJECT_WORKING_AGEMENT.md 保持未跟踪，不入本次提交。
+
+
+## 5. Planner Advanced service 层接入（已在本批实现，待提交）
+
+已在本批完成的顺序（不提前做 UI、不扩展商业系统）：
+
+1. lib/services/planner-service.ts：generateProjectTaskAiOptions() 增加
+   planner_advanced capability 检查。✔
+2. lib/planner/combination-service.ts：generateProjectPlanCombinations() 增加同一检查。✔
+3. lib/planner-api-errors.ts：PLANNER_ADVANCED_LOCKED → 402 映射。✔
+4. tsc --noEmit。✔（全量 PASS）
+5. scoped ESLint（本批文件）。✔（0 findings）
+6. 调用生成 API 验证 paid/trial 状态；再决定是否加 UI lock
+   （可选：commercial/start 加 GET + 两个 UI 按钮锁定态）——仍未开始。
+
+4 个 smoke-planner-* 已恢复全绿（37/40/24/12 passed, 0 failed）。
+
+明确冻结：不改 schema、不改 commercial-service 核心生命周期逻辑、
+不改 Planner 数据模型、不改免费 Planner 功能、不删历史数据。

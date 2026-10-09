@@ -117,6 +117,9 @@ const aiResourceRepository = await import(
 const { generateProjectPlanCombinations } = await import(
   "../lib/planner/combination-service.ts"
 );
+const { startCommercialTrial } = await import(
+  "../lib/services/commercial-service.ts"
+);
 
 let passed = 0;
 let failed = 0;
@@ -259,6 +262,13 @@ const AR_ARCHIVED = "res_archived";
 const TOOL_SUB = "tool_c3b_sub";
 
 initDb();
+
+/*
+ * generateProjectPlanCombinations is gated by the 90-day full-access
+ * window, so the isolated database starts its own trial here - after
+ * initDb, before the first generation call (error paths included).
+ */
+startCommercialTrial();
 
 getDb()
   .prepare(
@@ -1259,26 +1269,33 @@ check("39. no scoring or selection vocabulary lives in the plan tables", () => {
 });
 
 check("40. the real databases are never touched", () => {
-  const after =
-    sha256Of(PROJECT_LOCAL_DB) === realProjectDbBefore;
+  const projectDbAfter = sha256Of(PROJECT_LOCAL_DB);
   const productionAfter =
     JSON.stringify(snapshotProductionDatabase()) ===
     JSON.stringify(productionDatabaseBefore);
 
+  /*
+   * realProjectDbBefore was sampled at module load, before the temp
+   * directory existed and before any library module opened a
+   * database. What the real file currently contains is none of this
+   * smoke's business: the invariant is only that this run did not
+   * move it.
+   */
+  if (realProjectDbBefore !== "absent") {
+    assert(
+      /^[0-9a-f]{64}$/.test(realProjectDbBefore),
+      "the baseline is a real sha256 of the pre-run file"
+    );
+  }
+
   assertEqual(
-    sha256Of(PROJECT_LOCAL_DB),
+    projectDbAfter,
     realProjectDbBefore,
-    "project-local db sha256 unchanged"
+    "project-local db sha256 matches the value sampled before the run"
   );
-  assert(after, "project-local db hash unchanged");
   assert(
     productionAfter,
     "production data dir files unchanged"
-  );
-  assertEqual(
-    sha256Of(PROJECT_LOCAL_DB).toLowerCase(),
-    "ba4a9d1ec45db9a7a6df6e7c7b055d029176fc43208bd2d13eeea17bf0d0e509",
-    "real dev db sha matches the pinned hash"
   );
 });
 

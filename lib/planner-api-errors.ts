@@ -39,6 +39,16 @@ const NOT_FOUND_CODES: ReadonlySet<string> = new Set([
 ]);
 
 /*
+ * A capability the commercial lifecycle has locked (planner_advanced
+ * after the 90-day full-access window). The request is understood and
+ * the resource exists; it is refused for entitlement reasons, which
+ * is what HTTP 402 Payment Required expresses. Nothing else maps here.
+ */
+const PAYMENT_REQUIRED_CODES: ReadonlySet<string> = new Set([
+  "PLANNER_ADVANCED_LOCKED",
+]);
+
+/*
  * A terminal project or planned step cannot be moved again. That is a
  * conflict with the current state of the resource, not a malformed
  * request, so it is a 409. It matches how app/api/tasks already
@@ -59,6 +69,10 @@ const CONFLICT_CODES: ReadonlySet<string> = new Set([
 export function plannerErrorStatus(
   code: string
 ): number {
+  if (PAYMENT_REQUIRED_CODES.has(code)) {
+    return 402;
+  }
+
   if (NOT_FOUND_CODES.has(code)) {
     return 404;
   }

@@ -65,6 +65,7 @@ import {
 } from "@/lib/registry/ai-registry-repository";
 import type { RegistryPricingRow } from "@/lib/registry/ai-registry-repository";
 import { resolveRegisteredPricing } from "@/lib/planner/registered-pricing";
+import { isCommercialCapabilityAllowed } from "@/lib/services/commercial-service";
 import { PlannerServiceError } from "@/lib/services/planner-service";
 
 export type GeneratedCombinationResult = {
@@ -302,6 +303,22 @@ export function generateProjectPlanCombinations(
   projectId: string,
   options: { now?: string } = {}
 ): GeneratedCombinationResult {
+  /*
+   * planner_advanced gate: combination generation is one of the two
+   * paid entry points. It sits here rather than in the route so no
+   * future caller can bypass it, and it runs before any read or write
+   * so a locked caller learns the reason instead of a side effect of
+   * argument validation. All lifecycle math stays in commercial-service.
+   */
+  if (
+    !isCommercialCapabilityAllowed("planner_advanced")
+  ) {
+    fail(
+      "PLANNER_ADVANCED_LOCKED",
+      "Planner advanced features require a paid plan after the 90-day full-access period."
+    );
+  }
+
   const now = options.now ?? new Date().toISOString();
 
   if (!isInstant(now)) {

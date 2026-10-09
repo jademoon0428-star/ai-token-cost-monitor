@@ -117,6 +117,15 @@ export function initDb() {
       updated_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS commercial_state (
+      id TEXT PRIMARY KEY CHECK(id = 'singleton'),
+      first_use_at TEXT,
+      paid INTEGER NOT NULL DEFAULT 0,
+      paid_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
     /*
      * v1.4-A Task domain.
      *

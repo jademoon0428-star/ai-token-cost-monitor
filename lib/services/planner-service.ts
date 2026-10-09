@@ -57,6 +57,7 @@ import {
   type ResourceSource,
 } from "@/lib/planner/resource-universe";
 import { resolveRegisteredPricing } from "@/lib/planner/registered-pricing";
+import { isCommercialCapabilityAllowed } from "@/lib/services/commercial-service";
 import {
   listAiResources,
   type AiResourceChannel,
@@ -1467,6 +1468,22 @@ export function createProjectTaskAiOption(input: {
 export function generateProjectTaskAiOptions(
   projectTaskId: string
 ): ProjectTaskAiOptionRow[] {
+  /*
+   * planner_advanced gate: candidate generation is one of the two
+   * paid entry points. The check lives here, not in the route, so no
+   * future caller can reach generation without passing it. Reads go
+   * through commercial-service; this function never touches
+   * commercial_state directly and never re-derives the 90-day window.
+   */
+  if (
+    !isCommercialCapabilityAllowed("planner_advanced")
+  ) {
+    fail(
+      "PLANNER_ADVANCED_LOCKED",
+      "Planner advanced features require a paid plan after the 90-day full-access period."
+    );
+  }
+
   const projectTask = requireProjectTask(projectTaskId);
   const plan = requirePlan(projectTask.plan_id);
 

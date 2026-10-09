@@ -826,30 +826,130 @@ M1 完成。
 
 （以上为收口记录；本日此前各轮为只读决策轮，当时"无代码改动"的结论仅对当轮有效，以本节为准。）
 
+## 追加 4：Phase 5 产品化收口（发布就绪审查 + 空态/错误态修复，commit 80cd7a7）
+
+2026-10-08
+
+Phase 5 产品化收口已完成。
+
+步骤一（只读审查）：产出 PHASE5_RELEASE_READINESS_REVIEW.md，
+结论 Conditional GO，修复清单 §4；该文档保持未跟踪、不入 Git。
+
+步骤二（修复）：仅改 5 个源码文件，commit `80cd7a7`
+fix: improve empty and error states（112 insertions, 13 deletions）：
+
+1. Saving 页面无模型消费数据时显示明确 empty state。
+2. AI Activity 加入明确的数据加载失败状态。
+3. Dashboard Task Session 不再直接暴露 catch 中的原始错误信息。
+4. Usage Details 区分"完全没有 usage 数据"与"当前筛选条件无匹配数据"，
+   并提供官方 usage import 入口。
+5. Budget 无 verified cost 时显示明确 empty state；
+   未设置 budget 时明确说明显示的是 suggested values。
+
+边界：无 API / schema / service / repository / Planner 改动；
+未修改任何文档以外的其他源码；未触碰 v1.5.4 release/tag。
+
+## 追加 5：Commercial 生命周期基础层 + Dashboard 首次使用接入（待提交）
+
+2026-10-08
+
+90-Day Full Access 商业化落地，共两个批次，均未 commit（整理为待提交批次）。
+
+批次一（基础层）：新增 lib/schema.ts（commercial_state 表，first_use_at 可空，
++9 行）、lib/repositories/commercial-repository.ts、
+lib/services/commercial-service.ts、scripts/smoke-commercial-lifecycle.mjs。
+startCommercialTrial() 为唯一写入口；getCommercialLifecycle() 纯读，
+first_use_at 为 NULL 返回 null（未开始试用）。smoke 25/25 PASS。
+
+批次二（接入，仅 2 个源码文件）：新增 app/api/commercial/start/route.ts
+（POST，Server 侧执行）；app/page.tsx +6 行独立挂载 effect，
+fire-and-forget POST，catch 静默，不动现有 Dashboard 逻辑。
+明确不放 layout / instrumentation / initDb / usage import / SSR / 后台服务；
+不接付费判定。
+
+实测（Playwright 真实浏览器）：
+
+- 首开写入 first_use_at=2026-10-08T14:03:08.834Z；paid=0；paid_at=null；
+  full_access_trial；paidRequiredAt=2027-01-06（+90 天整）。
+- reload 后全部字段不变；StrictMode 双 POST 幂等（4 次 200）。
+- 21 张业务表零漂移。
+
+关键认知（冻结）：commercial_state 表存在 ≠ 试用开始；
+first_use_at IS NOT NULL 才代表商业生命周期开始
+（dev 启动时 initDb 会建空表）。
+
+## 追加 6：Planner Advanced 边界审查（结论冻结，service 层已实现待提交）
+
+2026-10-08
+
+全量普查 22 个 planner API route + planner-service + combination-service +
+candidate-generator 后冻结：
+
+planner_advanced 仅含 2 个生成型 service 函数：
+
+1. generateProjectPlanCombinations()（lib/planner/combination-service.ts）
+   ← POST /api/planner/projects/[id]/combinations。
+2. generateProjectTaskAiOptions()（lib/services/planner-service.ts）
+   ← POST /api/planner/tasks/[id]/ai-options/generate。
+
+免费保留：项目创建、阶段 CRUD、计划版本创建、任务 CRUD、AI options
+查询/手动创建/select、已生成历史读取、productivity/M1 报告（属其他
+capability）。
+
+技术方案：权限检查放 service 层（不放 route 层）——两个函数是唯一入口、
+防未来调用方绕过、route 保持薄壳、免费零影响；拒绝码
+PLANNER_ADVANCED_LOCKED → 402。smoke-planner-api 不触达 2 个生成端点，
+零回归。API 可绕过 UI，故必须服务端拦截；不存在"有 UI 无 API"入口。
+
 ## 验证
 
-本日最终验证（M1 收口轮）：
+M1 收口轮：
 
 - `npx tsc --noEmit`：PASS
 - `npm run lint`：M1 三个文件 0 findings；全仓 435 errors 为既有基线（desktop-package 构建产物与既有源文件），与 M1 无关
 - `npm run build`：PASS（25/25 页面）
 - 浏览器人工验证（Playwright 驱动）：23/23 PASS，验证后临时脚本与截图已删除
-- 三份文档内容互一致（方向文档 §11–§12 = HANDOFF 第十二–十四节 = 本日志）
+
+Phase 5 产品化收口轮（80cd7a7 批次）：
+
+- `npx tsc --noEmit`：PASS
+- `npm run build`：PASS（25/25 页面）
+- scoped ESLint：本批次涉及页面 PASS；usage/details 的 1 个
+  `react-hooks/set-state-in-effect` error 已核实为 HEAD 基线既有，非本批次引入
+- 提交前 staged 恰好 5 文件核对通过；提交后源码无残留修改
+
+Commercial 生命周期轮（基础层 + 接入，未提交）：
+
+- 基础层：smoke-commercial-lifecycle.mjs 25/25 PASS；tsc PASS；scoped ESLint PASS
+- 接入批次：`git diff --check` CLEAN；`npx tsc --noEmit` PASS；
+  scoped ESLint（route.ts + page.tsx）PASS 2/2
+- 运行时（Playwright 实测）：首开写入 first_use_at / paid=0 / full_access_trial /
+  paidRequiredAt=+90 天；reload 字段不变；StrictMode 幂等；业务表零漂移
+- 全量 build / 全量 lint / 全量 smoke 未重跑（scoped 检查全绿，按指令不跑）
+
+文档一致性：方向文档 §11–§14 = HANDOFF 第十二–十六节 = 本日志。
 
 ## Git 状态
 
-- 本轮提交：3 个代码文件 + 3 份文档（方向文档 / HANDOFF / 本日志），
-  提交信息 `feat: complete planner M1 comparison view and documentation`
-- 未跟踪的 PLANNER_STAGE_AND_TASK_MODEL_DESIGN.md、PROJECT_PROGRESS_TIMELINE.md、
-  PROJECT_WORKING_AGREEMENT.md 与异常文件 `=` 保持原样，不暂存
-- 不 push
+- 今日两笔提交：`6e9bf4c`（M1：3 代码 + 3 文档）、
+  `80cd7a7`（Phase 5 产品化收口：仅 5 个源码文件，112+/13-）。
+- 当前 HEAD：`80cd7a7`；Commercial 批次 + Planner Advanced 门禁 + smoke 修复
+  已整理为待提交批次（16 个文件：5 生产源码 + 4 个 commercial 新增 + 4 个 smoke + 3 份文档）。
+- 0 字节垃圾文件 `=` 已删除；PHASE5_RELEASE_READINESS_REVIEW.md、
+  PLANNER_STAGE_AND_TASK_MODEL_DESIGN.md、PROJECT_PROGRESS_TIMELINE.md、
+  PROJECT_WORKING_AGEMENT.md 保持未跟踪、不加入本次提交。
+- 本次文档更新随源码一并提交（3 份文档已更新“未提交”→“待提交”状态），不 git add、不 commit、不 push。
 
 ## 今日纪律
 
-- 代码改动仅限 M1 获批的 3 个文件；未修改 lib/、其余 app/、其余 components/、scripts/。
-- 未改 schema、未新增 API、未新增数据库字段、未实现 declared candidate、未打开 A/B/C 审查。
-- 未新增产品方向；§11.7 四项 declared 决策保持冻结。
-- 只修复 M1 引入的问题（1 个 set-state-in-effect），未重构、未顺手优化。
+- M1 批次仅改获批 3 文件；Phase 5 批次仅改获批 5 文件；无越界改动。
+- Commercial 批次：基础层新增 3 文件 + smoke；接入批次严格仅 2 个源码文件；
+  未 commit、未 push，待审。
+- 商业系统只做"启动试用"，未接任何付费判定；未新增会员等级/Pro/支付/账号。
+- 未改 schema 以外的既有表；未删除任何历史数据。
+- 未新增产品方向；§11.7 四项 declared 决策保持冻结；v1.5.4 release/tag 冻结不变。
+- 已通过的验证不重复执行；预存 lint 错误记录基线、不顺手修复。
+- 独立批次独立 staging / commit，提交前后均核对 staged 清单。
 
 今日工作结束。
 

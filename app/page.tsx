@@ -736,6 +736,12 @@ export default function Dashboard() {
   }, []);
 
   useEffect(() => {
+    void fetch("/api/commercial/start", {
+      method: "POST",
+    }).catch(() => null);
+  }, []);
+
+  useEffect(() => {
     if (!hasActiveTask) {
       return;
     }

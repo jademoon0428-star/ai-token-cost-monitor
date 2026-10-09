@@ -785,3 +785,104 @@ M1 完成。
 - 免费试用策略落地设计
 - Free / Paid 功能边界冻结
 - MVP 发布准备
+
+---
+
+# 13. 2026-10-08 记录：Phase 5 发布就绪审查与产品化收口完成
+
+## 发布就绪审查（只读）
+
+产出 `PHASE5_RELEASE_READINESS_REVIEW.md`（本地未跟踪，不入 Git）。
+
+结论：**Conditional GO**。核心价值路径（发现 AI 使用 → 查看成本 → 找到消耗来源 → 管理预算/优化行为）完整；无死链、无 TODO/debugger/秘钥残留；新装数据库安全（空库 + Registry 启动自动播种）。发布前小修清单与 Free/Paid 草案分别见该文档 §4、§7（草案未冻结）。
+
+## 产品化收口批次（已完成）
+
+commit：`80cd7a7` fix: improve empty and error states
+
+仅 5 个源码文件，112 insertions / 13 deletions：
+
+1. Saving 页面无模型消费数据时显示明确 empty state。
+2. AI Activity 加入明确的数据加载失败状态。
+3. Dashboard Task Session 不再直接暴露 catch 中的原始错误信息。
+4. Usage Details 区分"完全没有 usage 数据"与"当前筛选条件无匹配数据"，并提供官方 usage import 入口。
+5. Budget 无 verified cost 时显示明确 empty state；未设置 budget 时明确说明显示的是 suggested values。
+
+## 验证
+
+- `npx tsc --noEmit` PASS
+- `npm run build` PASS（25/25 页面）
+- scoped ESLint：本批次涉及页面 PASS；usage/details 的 1 个 `react-hooks/set-state-in-effect` error 为 HEAD 基线既有，非本批次引入
+
+## 边界
+
+- 无 API / schema / service / repository / Planner 改动
+- v1.5.4 release/tag 冻结不变；未 push；未创建新 commit（本节文档更新仅本地）
+- 未跟踪文件保持本地不入 Git：`=`、PHASE5_RELEASE_READINESS_REVIEW.md、PLANNER_STAGE_AND_TASK_MODEL_DESIGN.md、PROJECT_PROGRESS_TIMELINE.md、PROJECT_WORKING_AGREEMENT.md
+
+## 状态
+
+Phase 5 产品化收口完成。M1 完成（`6e9bf4c`）。当前 HEAD：`80cd7a7`。
+
+## 下一阶段
+
+Phase 5 后续（等待用户逐项决策，不自动开始）：
+
+- 免费试用策略落地设计
+- Free / Paid 功能边界冻结
+- MVP 发布准备
+
+# 14. 2026-10-08 记录：Commercial 生命周期落地 + Planner Advanced 边界冻结
+
+## 商业模式与生命周期（已实现）
+
+90-Day Full Access：用户首次真正使用产品起 90 天全功能；第 91 天未付费进入
+paid_required，高级能力拒绝，基础能力保留；历史数据永不删除；无登录/账号/
+多用户/支付网关/第三方 SDK；不新增会员等级与 Pro。
+
+6 个冻结 capability：planner_advanced、cost_advanced、budget_control、
+ai_activity_advanced、productivity_efficiency、planner_historical_efficiency。
+
+生命周期实现（待提交）：
+
+- commercial_state singleton 表；first_use_at 可空；试用起点唯一写入口为
+  startCommercialTrial()（原子 `WHERE first_use_at IS NULL`，重复调用不改写）。
+- getCommercialLifecycle() 纯读；first_use_at 为 NULL 返回 null（未开始）。
+- Dashboard（app/page.tsx）真实挂载后经 POST /api/commercial/start 启动试用；
+  不放 layout / instrumentation / initDb / usage import / SSR / 后台服务。
+- 实测：首开写入 first_use_at、paid=0、full_access_trial、
+  paidRequiredAt=+90×24h；reload 不变；幂等；业务表零漂移。
+
+关键认知（冻结）：commercial_state 表存在 ≠ 试用开始；
+first_use_at IS NOT NULL 才代表商业生命周期开始。
+
+## Planner Advanced 边界（只读审查结论，冻结）
+
+planner_advanced 不覆盖整个 Planner，仅含 2 个生成型 service 函数：
+
+1. generateProjectPlanCombinations()——多方案组合生成，替代用户规划决策成本。
+2. generateProjectTaskAiOptions()——Task AI Resource 候选生成，替代用户模型
+   选择决策成本。
+
+免费保留：项目创建、阶段 CRUD、计划版本创建、任务 CRUD、AI options 查询、
+手动创建 AI option、option select、已生成历史读取、productivity/M1 报告
+（属其他 capability）。
+
+技术方案（冻结）：权限检查放 service 层，不放 route 层——两个生成函数是
+唯一入口、防未来调用方绕过、route 保持薄壳、免费功能零影响；
+PLANNER_ADVANCED_LOCKED → HTTP 402。API 可绕过 UI，必须服务端拦截。
+
+## 状态
+
+Commercial 生命周期接入 + Planner Advanced service 层门禁 + 402 映射 + 4 个 smoke 修复
+已整理为 16 文件待提交批次，HEAD 仍 `80cd7a7`（本轮不 commit）。
+Planner Advanced 边界审查结论冻结并已在 service 层实现；UI lock 仍未开始。
+
+## 下一阶段
+
+Planner Advanced service 层权限接入（1–3 已在本批实现并待提交，4 未开始）：
+
+1. 两个 service 入口加 capability 检查 ✔
+2. planner error code（402）映射 ✔
+3. tsc + scoped eslint + 生成 API 实测 ✔（4 个 smoke 全绿 37/40/24/12，0 failed）
+4. 再决定是否加 UI lock（不提前做 UI，不扩展商业系统）——未开始

@@ -96,6 +96,9 @@ const plannerRepository = await import(
 const plannerService = await import(
   "../lib/services/planner-service.ts"
 );
+const { startCommercialTrial } = await import(
+  "../lib/services/commercial-service.ts"
+);
 const { createTask } = await import(
   "../lib/services/task-service.ts"
 );
@@ -210,6 +213,14 @@ const BARE_MODEL_ID = "model_c2_bare";
 const BARE_MODEL_NAME = "c2-bare-model";
 
 initDb();
+
+/*
+ * The generation entry points refuse to run once the 90-day
+ * full-access window is over (or before it has started), so the
+ * isolated database starts its own trial here - after initDb, before
+ * the first generateProjectTaskAiOptions call.
+ */
+startCommercialTrial();
 
 getDb()
   .prepare(
@@ -1432,11 +1443,26 @@ check(
 );
 
 /* ---------------------------------------------------------------- */
-/* 9. The API surface is unchanged                                  */
+/* 9. The API surface is bounded                                    */
 /* ---------------------------------------------------------------- */
 
+/*
+ * When this section was written there was no generation route at all,
+ * so every reference to the generator from app/api/planner was a
+ * regression. A generate route has since been added through the
+ * normal C3 review. The boundary it has to respect is now:
+ *
+ *   - the route set is the audited one, so an unexpected planner
+ *     route cannot appear unnoticed;
+ *   - generation stays a single service entry point, reachable from
+ *     exactly that one route;
+ *   - the route stays a thin shell: no option-table SQL, no
+ *     replacement/deletion of the batch, no estimator call and no
+ *     raw database handle ever appears in the API layer.
+ */
+
 check(
-  "no planner API route was added or altered for C2",
+  "the planner API keeps generation behind its single audited route",
   () => {
     const apiDir = path.join(
       DIR,
@@ -1445,7 +1471,9 @@ check(
       "api",
       "planner"
     );
-    const sources = [];
+    const generateRoutePath =
+      "tasks/[id]/ai-options/generate/route.ts";
+    const routes = [];
 
     function walk(dir) {
       for (const entry of readdirSync(
@@ -1457,25 +1485,97 @@ check(
         if (entry.isDirectory()) {
           walk(full);
         } else if (entry.name.endsWith(".ts")) {
-          sources.push(readFileSync(full, "utf8"));
+          routes.push({
+            name: path
+              .relative(apiDir, full)
+              .split(path.sep)
+              .join("/"),
+            source: readFileSync(full, "utf8"),
+          });
         }
       }
     }
 
     walk(apiDir);
 
-    const all = sources.join("\n");
+    const auditedRoutes = [
+      "declarations/route.ts",
+      "declarations/[id]/route.ts",
+      "declarations/[id]/archive/route.ts",
+      "plans/[id]/route.ts",
+      "plans/[id]/assignments/route.ts",
+      "plans/[id]/productivity/route.ts",
+      "plans/[id]/tasks/route.ts",
+      "projects/route.ts",
+      "projects/[id]/route.ts",
+      "projects/[id]/combinations/route.ts",
+      "projects/[id]/plans/route.ts",
+      "projects/[id]/stages/route.ts",
+      "resources/route.ts",
+      "resources/[id]/route.ts",
+      "resources/[id]/archive/route.ts",
+      "stages/[id]/route.ts",
+      "stages/[id]/archive/route.ts",
+      "tasks/[id]/route.ts",
+      "tasks/[id]/ai-options/route.ts",
+      generateRoutePath,
+      "tasks/[id]/ai-options/[optionId]/select/route.ts",
+    ];
+
+    assertEqual(
+      routes
+        .map((route) => route.name)
+        .sort()
+        .join("\n"),
+      auditedRoutes.slice().sort().join("\n"),
+      "the planner API route set is exactly the audited one"
+    );
+
+    const all = routes
+      .map((route) => route.source)
+      .join("\n");
 
     for (const forbidden of [
-      "generateProjectTaskAiOptions",
       "replaceProjectTaskAiOptions",
       "deleteProjectTaskAiOptions",
+      "INSERT INTO project_task_ai_options",
+      "DELETE FROM project_task_ai_options",
+      "UPDATE project_task_ai_options",
+      "estimatePlannerCost",
+      "estimatePlannerFit",
+      "estimatePlannerTime",
+      "applyPlannerStrategy",
     ]) {
       assert(
         !all.includes(forbidden),
         `API routes must not reference ${forbidden}`
       );
     }
+
+    const callers = routes.filter((route) =>
+      route.source.includes("generateProjectTaskAiOptions")
+    );
+
+    assertEqual(
+      callers.length,
+      1,
+      "exactly one planner route calls generateProjectTaskAiOptions"
+    );
+    assertEqual(
+      callers[0].name,
+      generateRoutePath,
+      "the single caller is the tasks/[id]/ai-options/generate route"
+    );
+    assert(
+      callers[0].source.includes(
+        'from "@/lib/services/planner-service"'
+      ),
+      "that route imports the generator from planner-service"
+    );
+    assert(
+      !callers[0].source.includes("getDb("),
+      "the route does not open the database itself"
+    );
   }
 );
 
