@@ -177,9 +177,12 @@ export default function CostsPage() {
     };
 
     if (!response.ok || !result.success) {
-      throw new Error(
-        result.error ?? "Failed to load cost data."
+      console.error(
+        "[Costs] API request failed:",
+        result.error ?? `HTTP ${response.status}`
       );
+
+      throw new Error("Failed to load cost data.");
     }
 
     return result;
@@ -227,10 +230,13 @@ export default function CostsPage() {
         }
       }
     } catch (err) {
+      console.error(
+        "[Costs] Failed to load cost data:",
+        err
+      );
+
       setError(
-        err instanceof Error
-          ? err.message
-          : "Failed to load cost data."
+        "Unable to load cost data. Please try again."
       );
 
       // Important:

@@ -47,7 +47,11 @@ async function postImport(
   const data = await res.json();
 
   if (!res.ok) {
-    throw new Error(data?.error || "Import failed.");
+    console.error(
+      "[Usage import] API request failed:",
+      data?.error ?? `HTTP ${res.status}`
+    );
+    throw new Error("Import request failed.");
   }
 
   return data;
@@ -86,7 +90,8 @@ export default function UsageImportPage() {
       setPreview({ summary: data.summary, hash: data.hash });
       setPhase("preview");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to parse ZIP.");
+      console.error("[Usage import] Preview failed:", e);
+      setError("Could not read this ZIP file. Please try again.");
       setPhase("pick");
     }
   }
@@ -115,7 +120,8 @@ export default function UsageImportPage() {
       setResult(data);
       setPhase("done");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Import failed.");
+      console.error("[Usage import] Import failed:", e);
+      setError("Import did not complete. Please try again.");
       setPhase("preview");
     }
   }
