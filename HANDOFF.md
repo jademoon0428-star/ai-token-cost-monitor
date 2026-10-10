@@ -2,6 +2,12 @@
 
 更新时间：
 
+2026-10-10（第十六更新：组1 §4-3 错误文案已提交 `ddb4df5`、组2 Planner Advanced lock UI 已提交 `6305de6`；源码工作区清零，仅余组3 三份文档未提交；见第十八节 §0）
+
+2026-10-10（第十五更新：Phase 5 只读事实核对 + 本地文档状态同步；§4-3 两页错误文案本地完成未提交；/costs 无入口记为已知限制；见第十八节）
+
+2026-10-09（第十四更新：Planner Advanced UI lock 完成静态实现与服务端隔离验证，浏览器交互实测经评估后决定停止；见第十七节）
+
 2026-10-09（第十三更新：Commercial 生命周期 + Planner Advanced service 层门禁 + 402 映射 + 4 个 planner smoke 修复整理为待提交批次（16 个文件：5 生产 + 4 smoke + 3 文档 + 4 个 commercial 新增文件），见第十六节；本轮仅整理边界，不执行 commit）
 
 2026-10-08（第十一更新：Phase 5 产品化收口完成，commit `80cd7a7`（仅 5 个源码文件，112+/13-），空态/错误态 5 项改进，见第十五节；文档仅本地更新，不提交）
@@ -980,3 +986,191 @@ smoke 影响：smoke-planner-api 不触达上述 2 个端点，零回归。
 
 明确冻结：不改 schema、不改 commercial-service 核心生命周期逻辑、
 不改 Planner 数据模型、不改免费 Planner 功能、不删历史数据。
+
+
+=================================================
+十七、2026-10-09 收尾：Planner Advanced UI lock（WIP 完成，浏览器实测停止）
+=================================================
+
+
+## 1. 当前状态（以此节为准）
+
+状态更新（2026-10-10）：本条目下"工作区未提交源码仅 2 个文件（UI WIP）"已过期——现为 4 个（新增 `/costs`、`/usage/import` 错误文案 2 文件）。
+后续更新（2026-10-10 提交后）：该 4 个源码文件已全部提交——组1 `ddb4df5`、组2 `6305de6`；现工作区源码修改为 0。
+当前实际工作区状态、下一步入口与已知限制以**第十八节**为准。（以下原文保留，仅作 2026-10-09 时点记录。）
+
+- HEAD：`5aefeee` feat: commercial lifecycle + planner_advanced gate + smoke fixes
+  （第十六节所述 16 文件批次已随该 commit 落库；本节为之后的 UI WIP 收尾）。
+- 工作区未提交源码仅 2 个文件（UI WIP）：
+  - app/planner/[projectId]/page.tsx（89 行变更）
+  - components/planner/task-ai-options.tsx（29 行变更）
+- 4 个未跟踪文档保持原样：PHASE5_RELEASE_READINESS_REVIEW.md、
+  PLANNER_STAGE_AND_TASK_MODEL_DESIGN.md、PROJECT_PROGRESS_TIMELINE.md、
+  PROJECT_WORKING_AGREEMENT.md。
+- 未 commit、未 push、未打 tag。下一步由用户决定是否提交这 2 个 UI 文件。
+
+
+## 2. UI WIP 范围（仅客户端，零服务端改动）
+
+在服务端返回精确错误码 PLANNER_ADVANCED_LOCKED 时：
+
+- 组合方案卡片（page.tsx）：显示锁定提示，隐藏"Generate combination plans"按钮。
+- Task AI options 面板（task-ai-options.tsx）：显示锁定提示，隐藏"Generate AI Options"按钮。
+
+普通错误、网络错误、JSON 解析失败仍走原有错误处理路径（错误行 + Retry），
+不显示锁定提示。不改服务端权限逻辑、API、schema、商业生命周期。
+锁定判定仅依赖 `data.code === "PLANNER_ADVANCED_LOCKED"`，不按 HTTP 状态码判定。
+
+
+## 3. 验证证据（如实区分已验证与未验证）
+
+已通过：
+
+- 服务端隔离数据库权限测试 14/14 PASS（%TEMP% 一次性脚本）：
+  - full_access_trial 下两个生成服务均放行；
+  - paid_required（仅在隔离库回拨 first_use_at 91 天构造）下两服务均抛
+    PLANNER_ADVANCED_LOCKED；
+  - plannerErrorStatus("PLANNER_ADVANCED_LOCKED") = 402；
+  - 普通错误映射不变（NOT_FOUND=404、CONFLICT=409、其余=400）。
+- TypeScript（npx tsc --noEmit）PASS。
+- scoped ESLint（仅两个 UI 文件）PASS。
+- git diff --check CLEAN。
+- 静态 diff 只读审查：无阻塞问题（锁定分支仅依赖精确错误码、
+  普通错误路径保留、finally 复位 loading、无 lifecycle 启动调用、
+  无客户端 90 天计算、无服务层权限修改）。
+
+未完成（明确停止，非遗漏）：
+
+- 浏览器端交互实测未完成。多次尝试受阻：
+  1) 隔离临时目录启动 Next.js：Turbopack 因 node_modules junction 报 panic；
+     改 webpack 后 lib/db.ts 的 node:fs 导入报 UnhandledSchemeError。
+  2) 真实项目根目录启动（端口 3000）：首页返回 HTTP 200，服务器可服务页面，
+     但 Playwright route-interception 交互验证未执行即按指令收尾。
+- HTTP 200 只证明服务器可响应首页，不等于锁定/错误/成功三种 UI 交互已验证。
+- 已决定停止浏览器测试，不再重试、不再投入环境排查——基于验证收益与
+  时间成本的明确决定，不是待办遗漏。服务端契约已由 14/14 隔离测试覆盖，
+  UI 锁定分支已由静态审查覆盖；浏览器实测的边际收益被判定为不值得继续投入。
+
+
+## 4. 数据库安全结论（前后快照实测比较）
+
+本轮从真实项目根目录启动过 next dev（页面加载会只读打开真实开发库）。前后
+SHA-256 比较六个文件（data/ 与 %APPDATA% 各三件套）：
+
+- data/ai-token-cost-monitor.db：SHA-256 与 mtime 均未变。
+- data/ai-token-cost-monitor.db-wal：SHA-256 与 mtime 均未变。
+- data/ai-token-cost-monitor.db-shm：SHA-256 变化、mtime 变化（大小未变）。
+  原因：WAL 模式下打开连接会触碰共享内存文件；主库与 WAL 内容哈希未变，
+  说明无业务数据写入。未做任何恢复操作。
+- %APPDATA%\AI-Cost-Management\data\ 三个文件：全部 SHA-256 与 mtime 均未变。
+
+结论：真实业务数据（.db 与 -wal 内容）未被修改；仅开发库的 -shm 侧文件被
+连接打开触碰，属 WAL 正常副作用。
+
+
+## 5. 下一步（简短明确）
+
+1. 依据上述数据库核对结果完成收尾（本节即收尾记录）。
+2. 如无异常，等待用户决定是否提交两个 UI 文件。
+3. 不重新安排浏览器测试，不重新安排全量回归。
+
+
+## 6. 保留的既定原则
+
+- 范围最小化：只做锁定 UI，不扩展商业系统。
+- 测试以实际价值为准：服务端已充分验证后，浏览器实测边际收益不足即停止。
+- 不为形式重复验证：已通过的 tsc / ESLint / diff --check / 隔离权限测试不重跑。
+- 不修改真实数据库作为测试手段：paid_required 构造只在隔离临时库进行。
+- 不自行 commit / push / 打 tag。
+
+
+=================================================
+十八、2026-10-10 状态：Phase 5 只读核对 + §4-3 错误文案本地完成（当前以此节为准）
+=================================================
+
+
+## 0. 状态更新（2026-10-10 提交后；覆盖 §1、§2、§6 第 1 项的"未提交"表述）
+
+- 组1 §4-3 错误文案：**已提交** `ddb4df5` fix: improve cost and import error messaging
+  （app/costs/page.tsx、app/usage/import/page.tsx，2 文件 20+/8-）。
+- 组2 Planner Advanced UI lock：**已提交** `6305de6` feat: add planner advanced lock UI
+  （app/planner/[projectId]/page.tsx、components/planner/task-ai-options.tsx，2 文件 89+/29-；
+  暂存核验仅含这 2 个文件，无未跟踪文件、无文档夹带）。
+- HEAD：`6305de6`；origin/master=`c1ce06f`，本地 ahead 9；未 push、未打 tag。
+- 工作区已跟踪未提交：**仅组3 三份文档**（本文件、PROJECT_DAILY_LOG.md、
+  PROJECT_DIRECTION_AND_DECISIONS.md）。
+- §1（HEAD `5aefeee`、"源码 4"）、§2（"本地完成，未提交"）、§6 第 1 项为提交前时点记录，
+  已被本块取代；原文保留。
+- 未跟踪 4 项不变、不入 Git；冻结文件（package.json、docs/CHANGELOG.md、
+  docs/PROJECT_STATUS.md、RELEASE_NOTES.md、release/、v1.5.4 tag）不变。
+
+
+## 1. 当前工作区状态（HEAD `5aefeee`，未 push、未打新 tag）
+
+（提交前时点记录，已由 §0 取代。）
+
+- HEAD：`5aefeee`；origin/master 停在 `c1ce06f`，本地 ahead 7。
+- 已跟踪未提交 7 项：
+  - 源码 4：app/costs/page.tsx、app/usage/import/page.tsx（本节 §2 的 §4-3 修改）；
+    app/planner/[projectId]/page.tsx、components/planner/task-ai-options.tsx（UI lock WIP，见第十七节）。
+  - 文档 3：本文件、PROJECT_DAILY_LOG.md、PROJECT_DIRECTION_AND_DECISIONS.md。
+- 未跟踪 4 项保持原样、不入 Git：PHASE5_RELEASE_READINESS_REVIEW.md、
+  PLANNER_STAGE_AND_TASK_MODEL_DESIGN.md、PROJECT_PROGRESS_TIMELINE.md、
+  PROJECT_WORKING_AGREEMENT.md。
+- 冻结文件全部未动：package.json、docs/CHANGELOG.md、docs/PROJECT_STATUS.md、
+  RELEASE_NOTES.md、release/、v1.5.4 tag、lib/services/productivity-service.ts。
+
+
+## 2. §4-3 错误文案收敛（本地完成，未提交）
+
+（已提交 `ddb4df5`，见 §0；以下为提交前记录。）
+
+- 修改文件仅 2 个：app/costs/page.tsx、app/usage/import/page.tsx。
+- 内容：两页用户可见错误不再直通 API 原始错误文本，改为固定文案
+  （"Unable to load cost data. Please try again." / "Could not read this ZIP file. Please try again." /
+  "Import did not complete. Please try again."），原始错误保留 console.error（沿用
+  80cd7a7 在 app/page.tsx 建立的模式）。加载、成功、失败、重试、导入行为与
+  API/业务语义零变化；无新依赖、无新日志框架。
+- 该轮验证（已完成，不重复执行）：
+  - `npx tsc --noEmit` PASS；
+  - scoped ESLint（仅 2 文件）：usage/import 0 findings；costs 的 1 error + 1 warning
+    经 `git show HEAD:… | eslint --stdin` 同名对照证实为 HEAD 既有基线（同规则同代码，
+    仅行号位移），本批次 0 新增 findings，按约定不顺手修复；
+  - `git diff --check` PASS；改动范围核对通过（仅这 2 个源码文件）。
+- 状态：**已实现、未提交**，不得称为已发布或已提交。
+
+
+## 3. 已知限制（记录，不处理）
+
+- /costs 与 /connect **保持无入口状态**：全仓入链 grep 0 命中，本轮按指令不新增入口，
+  作为已知限制记录（PHASE5_RELEASE_READINESS_REVIEW.md §11 已同步登记）。
+- 其余既有已知限制（lint 435 基线、安装包未签名、/connect 流程未完成、无 Settings/根 404 等）
+  见 PHASE5 §5/§6，维持不变。
+
+
+## 4. 浏览器交互测试（明确停止，不得重新安排）
+
+- UI lock 三态浏览器交互实测已于 2026-10-09 明确决定停止（第十七节 §3），本轮维持：
+  **不重新安排、不重试、不投入环境排查**。服务端契约由 14/14 隔离测试覆盖，
+  UI 锁定分支由静态 diff 审查覆盖。
+
+
+## 5. 本轮工作方式与验证
+
+- 本轮为只读事实核对 + 本地文档同步（PHASE5、DIRECTION、本文件、DAILY_LOG 四份）。
+- 未运行 tsc / ESLint / smoke / build / 打包 / 浏览器测试；未访问数据库；
+  未 git add / commit / push / tag；未修改任何源码、冻结文件与未跟踪设计文档。
+- 只读核对发现的矛盾（PHASE5 §9 "6 项已全部修复"不实、表头 HEAD 过期、
+  DIRECTION 版本描述过期、PROJECT_STATUS 停 1.5.1、冻结规则与发布工程清单冲突）
+  已在四份文档中如实更正或标注；无法安全修正的（冻结规则冲突）保留原文并上报用户。
+
+
+## 6. 下一步入口（等待用户授权，均未开始）
+
+1. 决定 4 个源码修改 + 3 份文档修改的提交/拆分方式（本轮不提交）。
+   （更新：组1 `ddb4df5`、组2 `6305de6` 已提交；余组3 3 份文档待决定，见 §0。）
+2. §4-4 孤儿页处置确认（当前按"维持无入口 + 已知限制"执行）。
+3. §4-6 发布工程：修改 package.json / docs/CHANGELOG.md / docs/PROJECT_STATUS.md /
+   RELEASE_NOTES.md **均尚无授权**；版本号未决定，不推测。
+4. 发布验收（全量 smoke + 打包产物检查）留待上述完成后执行，本轮未做。
+5. Phase 5 后续（免费试用策略设计、Free/Paid 边界冻结）仍等待逐项决策。

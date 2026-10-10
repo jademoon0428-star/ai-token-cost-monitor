@@ -1,7 +1,7 @@
 # PROJECT_DIRECTION_AND_DECISIONS
 
 项目长期方向与已确认决策的基准文档。
-事实依据：项目代码结构、`README.md`、`docs/ARCHITECTURE.md`、`docs/PROJECT_STATUS.md`、`docs/CHANGELOG.md`、git 历史（截至 `a2fde32`，`package.json` 版本 `1.5.3`），以及 2026-10-01 的 Planner 架构只读复核。
+事实依据：项目代码结构、`README.md`、`docs/ARCHITECTURE.md`、`docs/PROJECT_STATUS.md`、`docs/CHANGELOG.md`、git 历史（2026-10-10 核对：HEAD `5aefeee`，同日后续提交至 `6305de6`——组1 `ddb4df5`、组2 `6305de6`，`package.json` 版本 `1.5.4`），以及 2026-10-01 的 Planner 架构只读复核。（原表述"截至 `a2fde32`、版本 `1.5.3`"为更早时点记录，已过期。）
 
 阅读约定：
 
@@ -307,7 +307,8 @@ Planner 推荐 AI 时不要限制：用户电脑已有 AI、当前会员 AI、�
 | v1.4.0 / v1.4.1 | tasks、task sessions、usage→session 归因、`/api/tasks`、Dashboard Task Session UI、核心模块导航 |
 | v1.5.1 | AI Registry v1、AI Project Planner（项目/计划/步骤/Token 桶）、Planner 资源与组合方案、单步 AI 候选生成 UI、standalone 静态资源修复 |
 | v1.5.2 | 预算修复与 P0 官方成本完整性缺口收口 |
-| v1.5.3 | task sessions 接入 usage 归因，当前 `package.json` 版本 |
+| v1.5.3 | task sessions 接入 usage 归因（2026-10-01；当时为 `package.json` 版本，现已推进） |
+| v1.5.4 | Planner 项目阶段、Planner Productivity 报告（只读 API+UI）、Plan Detail 资源显示名修复（2026-10-07，tag `v1.5.4` → `bc47a9a`）；当前 `package.json` 版本 |
 
 技术底盘（同样已交付）：Next.js 16 App Router + React 19 + SQLite（`node:sqlite`，无 ORM）、严格分层、Windows 桌面打包与安装器、20+ 个隔离数据库的 smoke 脚本、`npx tsc --noEmit` 与 `npm run lint` 通过。
 
@@ -338,7 +339,17 @@ Planner 推荐 AI 时不要限制：用户电脑已有 AI、当前会员 AI、�
 
 **前置判断（决定立项）：** "最快完成方案"依赖 Registry 增加模型级速度事实；若厂商文档无法给出可引用的延迟/吞吐，该方案必须降级为近似并同步更新本文档，不得虚构精确数据。
 
-**文档滞后待修：** `docs/CHANGELOG.md` 与 `docs/PROJECT_STATUS.md` 最新条目停在 1.5.1，落后于 `package.json` 的 1.5.3。
+**文档与发布状态对照（2026-10-10 只读核对更正；原表述"两份文档停在 1.5.1、落后于 1.5.3"已过期）：**
+
+| 事实来源 | 当前记录 | 说明 |
+| --- | --- | --- |
+| `package.json` 版本 | `1.5.4` | 与 tag 一致 |
+| `docs/CHANGELOG.md` 最新条目 | `[1.5.4] — 2026-10-07` | 已非 1.5.1；M1/`80cd7a7`/`5aefeee` 内容尚未入册，无 `[Unreleased]` 段 |
+| `docs/PROJECT_STATUS.md` 记录版本 | 仍为 `1.5.1`（`2f28633`，2026-09-30） | **仍然滞后**，且含"app never seeds at runtime"等已被 instrumentation 播种取代的描述 |
+| 实际 Git 发布标签 | `v1.5.4`（annotated tag → `bc47a9a`）；另有 v1.4.1 / v1.5.0 / v1.5.1（无 v1.5.2、v1.5.3 tag） | v1.5.4 之后的 9 个提交（核对时 7 个至 `5aefeee`；同日组1 `ddb4df5`、组2 `6305de6` 后续提交）**已提交、未发布、未 push**（origin/master 停在 `c1ce06f`） |
+
+- 已发布 ≠ 已提交：`af020f0`…`6305de6` 共 9 个提交仅在本地，未 push、未打 tag、未发布（核对时点为 `5aefeee`、7 个）。
+- 修订 `docs/PROJECT_STATUS.md`、`docs/CHANGELOG.md`、`package.json` 属发布工程（HANDOFF 第十五节§5 / PHASE5 §4-6），**尚无授权，本轮未改**。
 
 ---
 
@@ -886,3 +897,67 @@ Planner Advanced service 层权限接入（1–3 已在本批实现并待提交�
 2. planner error code（402）映射 ✔
 3. tsc + scoped eslint + 生成 API 实测 ✔（4 个 smoke 全绿 37/40/24/12，0 failed）
 4. 再决定是否加 UI lock（不提前做 UI，不扩展商业系统）——未开始
+
+---
+
+# 15. 2026-10-09 记录：Planner Advanced UI lock 完成（静态）+ 浏览器实测停止
+
+## UI WIP 范围（仅客户端，未提交）
+
+§14 下一阶段第 4 项（"再决定是否加 UI lock"）已执行，结论：**加，且仅加最小客户端锁定 UI**。
+
+修改文件仅 2 个：
+
+- `app/planner/[projectId]/page.tsx`：组合方案卡片。
+- `components/planner/task-ai-options.tsx`：Task AI options 面板。
+
+行为：
+
+- 服务端返回精确错误码 `PLANNER_ADVANCED_LOCKED` 时，显示锁定提示（"Planner advanced features require a paid plan after the 90-day full-access period."），隐藏对应生成按钮。
+- 普通错误、网络错误、JSON 解析失败仍走原有错误路径（错误行 + Retry），不显示锁定提示。
+- 锁定判定仅依赖 `data.code === "PLANNER_ADVANCED_LOCKED"`，不按 HTTP 状态码判定（避免把其他 402 或中间层响应误判为锁定）。
+
+边界（冻结）：
+
+- 不改服务端权限逻辑、API、schema、商业生命周期。
+- 不调用 `/api/commercial/start`，不新增任何 commercial 读取端点。
+- 不做客户端 90 天计算、不缓存 lifecycle 状态、不新增解锁路径。
+- 锁定态一旦在客户端设置，无 UI 内解锁（当前无支付 UI，属可接受边界；后续接入支付后由用户重挂载页面恢复）。
+
+## 验证证据
+
+已通过（如实记录）：
+
+- 服务端隔离数据库权限测试 14/14 PASS（%TEMP% 一次性脚本，隔离临时库）：
+  - `full_access_trial` 下 `generateProjectTaskAiOptions` 与 `generateProjectPlanCombinations` 均放行；
+  - `paid_required`（仅在隔离库把 `first_use_at` 回拨 91 天构造）下两服务均抛 `PLANNER_ADVANCED_LOCKED`；
+  - `plannerErrorStatus("PLANNER_ADVANCED_LOCKED") = 402`；
+  - 普通错误映射不变（NOT_FOUND=404、CONFLICT=409、其余=400）。
+- TypeScript（`npx tsc --noEmit`）PASS。
+- scoped ESLint（仅两个 UI 文件）PASS。
+- `git diff --check` CLEAN。
+- 静态 diff 只读审查：无阻塞问题。
+
+未完成（明确停止，非遗漏）：
+
+- 浏览器端交互实测未完成。多次尝试受阻：隔离临时目录启动 Next.js 遭 Turbopack panic（node_modules junction）与 webpack `node:fs` UnhandledSchemeError；真实项目根目录启动（端口 3000）首页返回 HTTP 200，但 Playwright route-interception 交互验证未执行即按指令收尾。
+- HTTP 200 只证明服务器可响应首页，不等于锁定/错误/成功三种 UI 交互已验证。
+- **已决定停止浏览器测试，不再重试、不再投入环境排查**——基于验证收益与时间成本的明确决定。服务端契约已由 14/14 隔离测试覆盖，UI 锁定分支已由静态审查覆盖；浏览器实测的边际收益被判定为不值得继续投入。
+
+## 数据库安全结论（前后快照实测比较）
+
+本轮从真实项目根目录启动过 `next dev`（页面加载会只读打开真实开发库）。前后 SHA-256 比较六个文件：
+
+- `data/` 三件套：`.db` 与 `-wal` 的 SHA-256 与 mtime 均未变；仅 `-shm` 的 SHA-256 与 mtime 变化（大小未变）——WAL 模式下打开连接触碰共享内存文件的正常副作用，主库与 WAL 内容哈希未变说明无业务数据写入。未做任何恢复操作。
+- `%APPDATA%\AI-Cost-Management\data\` 三件套：全部 SHA-256 与 mtime 均未变。
+
+结论：真实业务数据未被修改。
+
+## 状态与下一步
+
+- 两个 UI 文件仍是未提交 WIP；HEAD 仍为 `5aefeee`。
+- 下一步由用户决定是否提交这两个 UI 文件。
+- （2026-10-10 更新：两个 UI 文件已提交 `6305de6` feat: add planner advanced lock UI；
+  同日组1 §4-3 亦提交 `ddb4df5`。原文保留为 2026-10-09 时点记录。）
+- 不重新安排浏览器测试，不重新安排全量回归。
+- 保留既定原则：范围最小化、测试以实际价值为准、不为形式重复验证、不修改真实数据库作为测试手段。

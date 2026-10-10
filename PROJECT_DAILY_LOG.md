@@ -956,6 +956,202 @@ Commercial 生命周期轮（基础层 + 接入，未提交）：
 
 ---
 
+# 2026-10-09
+
+## 工作目标
+
+完成 Planner Advanced UI lock 的静态实现与验证，并执行当日收尾。
+
+## 完成内容
+
+### UI WIP（仅 2 个文件，未提交）
+
+- app/planner/[projectId]/page.tsx：组合方案卡片在收到精确错误码
+  PLANNER_ADVANCED_LOCKED 时显示锁定提示并隐藏生成按钮；
+  普通错误仍走原有 throw → catch → 错误行 + Retry 路径。
+- components/planner/task-ai-options.tsx：Task AI options 面板同样逻辑，
+  锁定分支显式复位 loading 后返回。
+- 锁定判定仅依赖 `data.code === "PLANNER_ADVANCED_LOCKED"`，不按 HTTP 状态码判定。
+- 不改服务端权限逻辑、API、schema、商业生命周期；无 lifecycle 启动调用；
+  无客户端 90 天计算。
+
+### 验证证据
+
+已通过：
+
+- 服务端隔离数据库权限测试 14/14 PASS（%TEMP% 一次性脚本，隔离临时库）：
+  - full_access_trial 下 generateProjectTaskAiOptions 与
+    generateProjectPlanCombinations 均放行；
+  - paid_required（仅在隔离库把 first_use_at 回拨 91 天构造）下两服务均抛
+    PLANNER_ADVANCED_LOCKED；
+  - plannerErrorStatus("PLANNER_ADVANCED_LOCKED") = 402；
+  - 普通错误映射不变（PROJECT_NOT_FOUND=404、INVALID_STATUS_TRANSITION=409、
+    其余=400）。
+- TypeScript（npx tsc --noEmit）PASS。
+- scoped ESLint（仅两个 UI 文件）PASS。
+- git diff --check CLEAN。
+- 静态 diff 只读审查：无阻塞问题。
+
+未完成（明确停止）：
+
+- 浏览器端交互实测未完成。多次尝试受阻：
+  1) 隔离临时目录启动 Next.js：Turbopack 因 node_modules junction 报 panic；
+     改 webpack 后 lib/db.ts 的 node:fs 导入报 UnhandledSchemeError。
+  2) 真实项目根目录启动（端口 3000）：首页返回 HTTP 200，服务器可服务页面，
+     但 Playwright route-interception 交互验证未执行即按指令收尾。
+- HTTP 200 只证明服务器可响应首页，不等于三种 UI 交互已验证。
+- 已决定停止浏览器测试，不再重试、不再投入环境排查——基于验证收益与
+  时间成本的明确决定，不是待办遗漏。
+
+### 数据库安全（前后快照实测比较）
+
+本轮从真实项目根目录启动过 next dev（页面加载会只读打开真实开发库）。前后
+SHA-256 比较六个文件：
+
+- data/ 三件套：.db 与 -wal 的 SHA-256 与 mtime 均未变；仅 -shm 的 SHA-256
+  与 mtime 变化（大小未变）——WAL 模式下打开连接触碰共享内存文件的正常副作用，
+  主库与 WAL 内容哈希未变说明无业务数据写入。未做任何恢复操作。
+- %APPDATA%\AI-Cost-Management\data\ 三件套：全部 SHA-256 与 mtime 均未变。
+
+结论：真实业务数据未被修改。
+
+### 服务器清理
+
+- PID 21704（node ... next dev -p 3000，本项目路径）核对命令行后停止；
+  端口 3000 无残留监听；无归属本轮的 Playwright/Chromium 残留进程。
+
+## Git 状态
+
+- HEAD：`5aefeee` feat: commercial lifecycle + planner_advanced gate + smoke fixes。
+- 未提交源码仅 2 个 UI 文件（89 + 29 行变更）。
+- 4 个未跟踪文档保持原样：PHASE5_RELEASE_READINESS_REVIEW.md、
+  PLANNER_STAGE_AND_TASK_MODEL_DESIGN.md、PROJECT_PROGRESS_TIMELINE.md、
+  PROJECT_WORKING_AGREEMENT.md。
+- 未 commit、未 push、未打 tag。
+
+## 重要决定
+
+1. 停止浏览器实测：服务端契约已由 14/14 隔离测试覆盖，UI 锁定分支已由静态
+   diff 审查覆盖；浏览器实测多次因环境问题受阻，边际收益被判定为不值得继续
+   投入。这是明确决定，不是遗漏待办。
+2. 两个 UI 文件保持未提交 WIP，由用户决定是否提交。
+
+## 下一步
+
+1. 依据数据库核对结果完成收尾（本日志即收尾记录）。
+2. 如无异常，等待用户决定是否提交两个 UI 文件。
+3. 不重新安排浏览器测试，不重新安排全量回归。
+
+今日工作结束。
+
+
+---
+
+# 2026-10-10
+
+## 工作目标
+
+Phase 5 发布准备：恢复上下文 → 盘点真实剩余事项 → 收尾 §4-3 错误文案 → 发布前置只读核对 → 本地文档事实同步。
+
+## 完成内容（按轮次）
+
+### 1. 只读上下文恢复与剩余事项盘点（2 轮，未改任何文件）
+
+- 读取 5 份管理文档 + git 只读核对，输出上下文摘要与 Phase 5 剩余事项分类
+  （已完成 / 真实未完成 / 已明确推迟）。
+- 逐项核验 PHASE5 §4 六项：1、2、5 与 3（首页部分）已提交于 `80cd7a7`；
+  3（余量）当时未做；4 未决策；6 未做。
+
+### 2. §4-3 错误文案收敛（实施 + 验证，**本地完成、未提交**）
+
+- 修改文件仅 2 个：`app/costs/page.tsx`、`app/usage/import/page.tsx`。
+- 内容：用户可见错误不再直通 API 原始错误文本，改为固定文案；原始错误保留
+  `console.error`（沿用 `80cd7a7` 在 `app/page.tsx` 建立的模式）；加载/成功/失败/
+  重试/导入行为与 API/业务语义零变化；无新依赖、无新日志框架。
+- 该轮验证（如实记录，今日已跑、其后不重复）：
+  - `npx tsc --noEmit`：PASS；
+  - scoped ESLint（仅 2 文件）：`usage/import` 0 findings；`costs` 的 1 error +
+    1 warning 经 `git show HEAD:… | eslint --stdin` 同名对照**证实为 HEAD 既有基线**
+    （同规则同代码、仅行号位移），本批次 0 新增 findings，按 §15 约定记录基线、不顺手修复；
+  - `git diff --check`：PASS；改动范围核对：仅这 2 个源码文件。
+- 未提交、未 push；不得称为已发布或已提交。
+
+### 3. 发布前置只读核对（未改任何文件、未跑任何测试）
+
+- 冻结规则核对：HANDOFF 第十一节§3 与 第十二节§4 无条件冻结 package.json、
+  docs/CHANGELOG、RELEASE_NOTES、release/、v1.5.4 tag；WORKING_AGREEMENT §14/§15
+  为"不因日常工作改动"；CHANGELOG L5 允许 `[Unreleased]` 追加。
+- 版本记录核对：package.json=`1.5.4`；CHANGELOG 最新 `[1.5.4] — 2026-10-07`；
+  PROJECT_STATUS 仍记 1.5.1；tag `v1.5.4` → `bc47a9a`；HEAD `5aefeee`、ahead 7。
+- 结论：**对 package.json / docs/CHANGELOG.md / docs/PROJECT_STATUS.md /
+  RELEASE_NOTES.md 无任何修改授权**（发布工程清单均标注"等待用户逐项决策"）。
+
+### 4. 本地文档事实同步（本轮，仅 4 份文档）
+
+- PHASE5：更正表头 HEAD（`6e9bf4c` → `5aefeee`）、更正 §9 "6 项已全部修复"的不实表述、
+  新增 §11 逐项核对表 / 已知限制 / 版本三层区分 / 待授权清单。
+- DIRECTION：更正 L4 事实依据、§8 版本表（补 v1.5.4 行、去"当前版本"错误标注）、
+  L341 改为四方对照表（package.json / CHANGELOG / PROJECT_STATUS / 实际 tag）。
+- HANDOFF：新增第十八节（当前工作区状态、§4-3 本地完成及验证、/costs 已知限制、
+  浏览器测试停止确认、下一步入口）；第十七节 §1 加过期标注。
+- DAILY_LOG：本条记录。
+- 均未修改产品方向与任何已冻结决策；未删除历史记录，仅加时点标注。
+
+### 5. 组1、组2 提交（2026-10-10 后续，由用户执行并授权记录）
+
+- 组1：`ddb4df5` fix: improve cost and import error messaging
+  （app/costs/page.tsx、app/usage/import/page.tsx，2 文件 20+/8-）。
+- 组2：`6305de6` feat: add planner advanced lock UI
+  （app/planner/[projectId]/page.tsx、components/planner/task-ai-options.tsx，2 文件 89+/29-）；
+  暂存核验仅含这 2 个目标文件，无未跟踪文件、无文档夹带。
+- 效果：工作区源码修改清零；本节 §2 标题"本地完成、未提交"及下方"未提交、未 push"
+  为提交前时点记录，由本条更新；组3 三份文档仍未提交。
+
+## 只读核对发现的关键矛盾及处理结果
+
+| 矛盾 | 处理结果 |
+| --- | --- |
+| PHASE5 §9 "§4 的 6 项已全部修复并提交（80cd7a7）" — 不实（3 余量/4/6 当时未做） | 已在 PHASE5 §9 就地更正 + 新增 §11 逐项表 |
+| PHASE5 表头 HEAD `6e9bf4c` vs 实际 `5aefeee` | 已更正表头并注明时点 |
+| PHASE5 §9 "商业生命周期（未提交）" vs 已随 `5aefeee` 提交 | 已在小节标题标注"现已随 5aefeee 提交，见 §10" |
+| DIRECTION 文档头部事实依据、§8 版本表、§8"文档滞后待修"段 — 版本与 CHANGELOG 滞后描述过期 | 已更正；PROJECT_STATUS 确认仍滞后（保留为待修项） |
+| PROJECT_STATUS 停 1.5.1、"app never seeds at runtime" 已被 instrumentation 取代 | **保留原文未改**（无授权），已在 DIRECTION 对照表与 PHASE5 §11 登记为待发布工程项 |
+| HANDOFF 第十七节"未提交源码仅 2 个"已过期 | 已加过期标注指向第十八节，原文保留 |
+| 冻结清单（HANDOFF 无条件冻结 CHANGELOG/package.json）与发布工程清单（要求改两者）冲突 | **保留原文、不解释为授权**，已上报用户待决 |
+
+## Git 状态
+
+- HEAD：`5aefeee`；origin/master=`c1ce06f`，ahead 7；未 push、未打 tag。
+- 未提交：4 个源码（2 个 §4-3 + 2 个 UI lock WIP）+ 3 份已跟踪文档（本文件、
+  HANDOFF.md、PROJECT_DIRECTION_AND_DECISIONS.md）；另 PHASE5_RELEASE_READINESS_REVIEW.md
+  为未跟踪文档，本轮同样已更新（保持未跟踪、不入 Git）。
+- 未跟踪 4 项保持原样：PHASE5、STAGE_DESIGN、TIMELINE、WORKING_AGREEMENT。
+
+（2026-10-10 提交后更新：HEAD=`6305de6`，origin/master=`c1ce06f`，ahead 9，未 push、未打 tag；
+上方 HEAD `5aefeee`/ahead 7/"4 个源码未提交"为提交前时点记录。4 个源码已全部提交——
+组1 `ddb4df5`、组2 `6305de6`；未提交仅余本节所列 3 份文档；未跟踪 4 项不变；冻结文件不变。）
+
+## 今日纪律
+
+- 未执行 git add / commit / push / tag；未运行 tsc / ESLint / smoke / build / 打包 /
+  浏览器测试（§4-3 一轮的 tsc/scoped ESLint 为当时新改动的必要验证，已跑、不重复）。
+- 未访问或修改数据库；未改源码（除 §4-3 授权的 2 文件）、未改冻结文件与未跟踪设计文档。
+- 未虚构任何测试、提交、发布或用户授权；版本号未决定、不推测。
+- 浏览器交互测试维持停止决定，未重新安排。
+
+## 下一步（等待用户授权，均未开始）
+
+1. 4 个源码 + 4 份文档的提交/拆分决定。
+   （更新：组1 `ddb4df5`、组2 `6305de6` 已提交；余组3 3 份文档 + 4 个未跟踪文件待决定。）
+2. §4-4 孤儿页处置确认（当前：维持无入口 + 已知限制）。
+3. §4-6 发布工程的文件修改授权（package.json / CHANGELOG / PROJECT_STATUS / RELEASE_NOTES）。
+4. 发布验收（全量 smoke + 打包产物检查）时点确认。
+
+今日工作结束。
+
+
+---
+
 # 工作原则
 
 以后每天结束必须更新：
