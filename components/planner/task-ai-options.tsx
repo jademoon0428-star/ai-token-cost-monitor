@@ -510,6 +510,8 @@ export default function TaskAiOptions({
   const [generateError, setGenerateError] = useState<
     string | null
   >(null);
+  const [generationLocked, setGenerationLocked] =
+    useState(false);
   const [reloadKey, setReloadKey] = useState(0);
 
   /*
@@ -661,6 +663,22 @@ export default function TaskAiOptions({
         !data ||
         data.ok !== true
       ) {
+        /*
+         * The commercial lifecycle can refuse generation after the
+         * 90-day full-access window. That refusal is a stable code,
+         * not a message string, so the panel switches to a locked
+         * notice instead of the generic error line. Every other
+         * failure keeps the existing error path.
+         */
+        if (
+          typeof data?.code === "string" &&
+          data.code === "PLANNER_ADVANCED_LOCKED"
+        ) {
+          setGenerationLocked(true);
+          setGenerating(false);
+          return;
+        }
+
         throw new Error(
           typeof data?.error === "string"
             ? data.error
@@ -769,7 +787,16 @@ export default function TaskAiOptions({
                 </p>
               ) : null}
 
-              {generationEligible ? (
+              {generationLocked ? (
+                <p
+                  role="alert"
+                  style={ERROR_TEXT_STYLE}
+                >
+                  Planner advanced features
+                  require a paid plan after the
+                  90-day full-access period.
+                </p>
+              ) : generationEligible ? (
                 <button
                   type="button"
                   disabled={generating}

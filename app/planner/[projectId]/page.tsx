@@ -441,6 +441,8 @@ export default function ProjectDetailPage() {
   const [combinationError, setCombinationError] = useState<
     string | null
   >(null);
+  const [combinationsLocked, setCombinationsLocked] =
+    useState(false);
 
   const [compareRequested, setCompareRequested] =
     useState(false);
@@ -708,6 +710,21 @@ export default function ProjectDetailPage() {
         !data?.ok ||
         !data?.generation
       ) {
+        /*
+         * The commercial lifecycle can refuse generation after the
+         * 90-day full-access window. That refusal is a stable code,
+         * not a message string, so the card switches to a locked
+         * notice instead of the generic error line. Every other
+         * failure keeps the existing error path.
+         */
+        if (
+          typeof data?.code === "string" &&
+          data.code === "PLANNER_ADVANCED_LOCKED"
+        ) {
+          setCombinationsLocked(true);
+          return;
+        }
+
         throw new Error(
           typeof data?.error === "string"
             ? data.error
@@ -1285,34 +1302,50 @@ export default function ProjectDetailPage() {
               </p>
             ) : null}
 
-            <button
-              type="button"
-              onClick={() =>
-                void handleGenerateCombinations()
-              }
-              disabled={generatingCombinations}
-              style={{
-                padding: "10px 16px",
-                borderRadius: 8,
-                border: 0,
-                background: "#172033",
-                color: "#fff",
-                fontSize: 14,
-                fontWeight: 700,
-                cursor: generatingCombinations
-                  ? "default"
-                  : "pointer",
-                opacity: generatingCombinations
-                  ? 0.6
-                  : 1,
-              }}
-            >
-              {generatingCombinations
-                ? "Generating…"
-                : combinationError
-                  ? "Retry"
-                  : "Generate combination plans"}
-            </button>
+            {combinationsLocked ? (
+              <p
+                role="alert"
+                style={{
+                  margin: "0 0 14px",
+                  color: "#b42318",
+                  fontSize: 14,
+                  lineHeight: 1.5,
+                }}
+              >
+                Planner advanced features
+                require a paid plan after the
+                90-day full-access period.
+              </p>
+            ) : (
+              <button
+                type="button"
+                onClick={() =>
+                  void handleGenerateCombinations()
+                }
+                disabled={generatingCombinations}
+                style={{
+                  padding: "10px 16px",
+                  borderRadius: 8,
+                  border: 0,
+                  background: "#172033",
+                  color: "#fff",
+                  fontSize: 14,
+                  fontWeight: 700,
+                  cursor: generatingCombinations
+                    ? "default"
+                    : "pointer",
+                  opacity: generatingCombinations
+                    ? 0.6
+                    : 1,
+                }}
+              >
+                {generatingCombinations
+                  ? "Generating…"
+                  : combinationError
+                    ? "Retry"
+                    : "Generate combination plans"}
+              </button>
+            )}
           </div>
 
           <div style={cardStyle}>
