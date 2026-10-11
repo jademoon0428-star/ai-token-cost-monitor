@@ -204,3 +204,40 @@ AI-Cost-Management-Payload.cab
 
 ## Installer SHA256
 01C130AAA8974FED9218E7F64DB571C78118567D285A0A779276D8BDA4B9951E
+
+---
+
+# AI Cost Management v1.5.5
+
+## Release Status
+Release Preparation (full 17-item smoke gate passed 17/17 on 2026-10-10; the DeepSeek DB smoke now isolates to a temp database by default — test tooling only, no product data change; read-only release risk review and precondition checks completed; official CAB/Setup/README/SHA256SUMS, installer SHA256 backfill, install validation, and tag are not yet done)
+
+## Version
+1.5.5
+
+## Date
+2026-10-10
+
+## Changes in v1.5.5
+- Declared AI resources inventory: declare ways of reaching an AI model that the app cannot verify itself (web subscription, third-party gateway, shared account). Declarations store no credentials and never enter the Registry or the owned-resources inventory. Managed from the Planner resources page.
+- AI Registry startup baseline: an empty install now seeds the Registry baseline automatically at startup (idempotent, never blocks startup). Running `npm run seed:registry` manually is no longer required for first run.
+- Planner AI-option state: each generated option now shows its resource state (source, registration, entitlement, availability, pricing, capability) as facts. Generation still never filters, scores, or recommends.
+- Planner comparison view (M1): project detail shows the five-plan comparison built from existing plan facts. Same-currency values are summed per currency only; unknown pricing is shown as unknown; nothing is ranked.
+- Empty and error state fixes: /saving model-spending empty fallback, /ai-activity error state (now distinct from "nothing detected"), Dashboard task-session error copy, /usage/details and /budget empty-state import CTAs, /budget default amounts labelled as unsaved suggestions.
+- Cost and import error messages: /costs and /usage/import show fixed friendly error text instead of raw API errors.
+- Upgrade note: new tables `declared_ai_resources` and `commercial_state` are created automatically at startup; `project_task_ai_options.model_id` became nullable. No manual migration is required.
+
+## Behavior Change — Planner Advanced gate (please read)
+- A 90-day full-access window starts on first real use (the first time the Dashboard opens in a session; recorded once as the first-use timestamp and never rewritten).
+- After 90 days, two Planner features are gated behind a paid plan: combination-plan generation and per-task AI-options generation. The app shows the notice "Planner advanced features require a paid plan after the 90-day full-access period." and hides those generate buttons.
+- This version contains no in-app payment, license entry, or unlock flow. Free features — import, Dashboard, Budget, Saving, Efficiency, AI Activity, Registry facts, and all existing Planner reading and management — remain available, and historical plans and options are never deleted.
+
+## Installer
+AI-Cost-Management-Setup.exe
+
+## Package
+AI-Cost-Management-Payload.cab
+
+## Installer SHA256
+AI-Cost-Management-Setup.exe SHA256 verified:
+C8403A4D9276D2636D3EF1844865D5404F8DFB3B3DA24AE2102FA705C5F128EF

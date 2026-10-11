@@ -1,6 +1,6 @@
 # Project Status
 
-Snapshot of the repository at commit `2f28633` (2026-09-30). Documentation only — no code was changed to produce this file.
+Snapshot of the repository at commit `def18c2` (2026-10-10), prepared for the v1.5.5 release. Documentation only — no code was changed to produce this file. v1.5.5 is prepared on `master` but is **not yet released**: the full smoke gate passed 17/17 on 2026-10-10, while desktop packaging, installer SHA256, and tag are still pending.
 
 ## Stage
 
@@ -17,11 +17,11 @@ Operating principles, in priority order:
 
 | Field | Value |
 | --- | --- |
-| `package.json` version | `1.5.1` |
-| Last released | v1.5.1 (`2f28633`, 2026-09-30) |
-| Branch | `master` |
+| `package.json` version | `1.5.5` (prepared, not yet tagged or packaged) |
+| Last released | v1.5.4 (`bc47a9a`, 2026-10-07) |
+| Branch | `master` (10 commits ahead of `origin/master`, not yet pushed) |
 
-v1.5.1 is the current release and ships the AI Registry and AI Project Planner work described below. v1.4.1 remains frozen and is superseded.
+v1.5.4 is the current release (Planner project stages, Productivity Report, Plan Detail display-name fix). v1.5.5 is prepared on `master` and covers the commits after the v1.5.4 tag; it has not been tagged, packaged, or pushed.
 
 ## What is released and stable
 
@@ -34,12 +34,15 @@ v1.5.1 is the current release and ships the AI Registry and AI Project Planner w
 | v1.4.0 | v1.4-A/B: tasks, task sessions, usage-to-session attribution, `/api/tasks`, Dashboard Task Session UI. |
 | v1.4.1 | Core module navigation. No database, API, Dashboard, or installer change. |
 | v1.5.1 | AI Registry v1, AI Project Planner, Planner resources and combination plans, Planner AI-option generation UI, and the production standalone static-assets fix. |
+| v1.5.2 | Budget page query fix and official-cost integrity hardening. No schema change. |
+| v1.5.3 | Task Sessions connected to usage attribution. |
+| v1.5.4 | Planner project stages, Planner Productivity Report (read-only), Plan Detail resource display-name fix. New `project_stages` table, created automatically. |
 
 ## What shipped in v1.5.1
 
 Three additive layers shipped in v1.5.1 (released 2026-09-30).
 
-**AI Registry v1** — a vendor-facts layer. Providers, models, capabilities, and official rate cards, seeded from vendor documentation with a `source_url` and `source_checked_at`. It never rates, ranks, or scores a model, and it never records a capability as unsupported unless the vendor documents that. Seeded with 4 providers and 10 models. `npm run seed:registry` is a manual step; the app never seeds at runtime.
+**AI Registry v1** — a vendor-facts layer. Providers, models, capabilities, and official rate cards, seeded from vendor documentation with a `source_url` and `source_checked_at`. It never rates, ranks, or scores a model, and it never records a capability as unsupported unless the vendor documents that. Seeded with 4 providers and 10 models. `npm run seed:registry` remains available for manual re-seeding. (Correction, v1.5.5 batch: `instrumentation.ts` now also seeds this baseline automatically at startup — idempotent and never blocking; the earlier "the app never seeds at runtime" statement no longer holds.)
 
 **AI Project Planner** — project intent, immutable plan versions, planned steps with token buckets, and candidate AI options per step. Options are facts, not recommendations: generation never filters, never ranks by score, and never selects. Selection is a separate, explicit user action.
 
@@ -66,6 +69,7 @@ These are deliberate scope boundaries, not defects. They are listed here so they
 - Planner cost math has no cached or reasoning term, because `project_tasks` carries no such estimate and the output estimate already includes reasoning.
 - Pricing scope ceilings (OpenAI's 272K short-context boundary) are hardcoded in the cost estimator because `pricing_versions` has no scope column. This is a deliberate but real two-sources-of-truth risk.
 - The available-AI-tools list is not rendered. The Planner API has no endpoint that lists `user_ai_tools`.
+- Planner Advanced gate (v1.5.5 batch): 90 days after first use, combination-plan generation and per-task AI-options generation refuse with `PLANNER_ADVANCED_LOCKED` (HTTP 402) until the state is marked paid. There is no in-app payment or unlock flow; free features and all historical reads remain available.
 
 **Platform**
 
@@ -77,7 +81,7 @@ These are deliberate scope boundaries, not defects. They are listed here so they
 
 ## Verification baseline
 
-Smoke suites run against an isolated temp database by setting `NODE_ENV=development` and changing directory before the lib modules load, so a production database is never opened.
+Smoke suites run against an isolated temp database by setting `NODE_ENV=development` and changing directory before the lib modules load, so a production database is never opened. The DeepSeek DB smoke isolates differently (correction, v1.5.5 batch): it defaults to a fresh `mkdtemp` temp database, deletes it on success, keeps it for diagnosis on failure (printing its absolute path), and refuses malformed arguments instead of ever falling back to the development database.
 
 ```bash
 npm run lint
@@ -93,14 +97,25 @@ npm run smoke:planner-combination-persistence
 npm run smoke:planner-estimator
 npm run smoke:planner-evidence
 npm run smoke:planner-c1
+npm run smoke:planner-productivity
 npm run smoke:deepseek
 ```
 
+The v1.5.5 batch adds three smoke scripts that are **not yet wired to npm scripts** and are run directly with `node --experimental-strip-types`: `scripts/smoke-planner-declarations.mjs`, `scripts/smoke-registry-baseline.mjs`, and `scripts/smoke-commercial-lifecycle.mjs`. The full 17-item release gate (14 npm-registered plus these three direct runs) was executed on 2026-10-10 and passed 17/17. (Correction, v1.5.5 batch: the earlier statement that the release gate had not been executed is superseded.)
+
 Additional validation and maintenance scripts (`validate-*.mjs`, `test-local-parsers.mjs`, `repair-deepseek-duplicate-import.mjs`, and the two small `*-smoke-test.mjs` files) are run manually and are not wired to npm scripts. `repair-deepseek-duplicate-import.mjs` is a one-time fix for a single known database state and is not general maintenance.
+
+## Release preparation status (2026-10-10, end of day)
+
+- The DeepSeek DB smoke was fixed and now isolates by default: no-argument runs use a fresh `mkdtemp` temp database (cleaned on success, kept with its absolute path printed on failure); `--db <path>` is the only way to target a specific database, and malformed arguments fail loudly instead of touching the development database. Isolation suite 22/22 PASS; `npm run smoke:deepseek` PASS; the development database (db/wal/shm hash, size, mtime; integrity ok; providers 4, DeepSeek models 5, official_export usage/cost 25/25, fixture 0/0) was unchanged. Test tooling only — no product or business data was modified.
+- The DDF generator (`scripts/generate-package-ddf.mjs`, currently untracked) supports deterministic generation and a read-only `--check`; isolated tests 15/15 PASS. `desktop/installer/package.ddf` holds 1817 entries; a temporary CAB trial matched the archive bidirectionally with zero forbidden files. The trial is **not** an official v1.5.5 artifact.
+- Read-only pre-release work completed: a risk review (no P0; three P1 process risks: package-before-DDF ordering, manual Setup/README/SHA256SUMS steps, cautious failure cleanup) and a precondition check (tool paths, v1.5.4 naming, `release\AI-Cost-Management-v1.5.5\` absent).
+- The user stopped here for the day. The official release chain (fresh `package:desktop`, official DDF/CAB/Setup/README/SHA256SUMS, SHA256 backfill, install validation, commit, tag, push) has **not** been authorized or executed. The 13 temp directories left by other smoke scripts (repo convention) are not cleaned and must not be cleaned without authorization.
 
 ## Definition of done for the next release
 
-- The Registry and Planner work shipped in v1.5.1 (2026-09-30), with release notes that match `docs/CHANGELOG.md`.
+- v1.5.4 shipped on 2026-10-07 (tag → `bc47a9a`), with release notes that match `docs/CHANGELOG.md`.
+- v1.5.5 (commits `af020f0`…`def18c2`) is prepared on `master`: version files updated and the full smoke gate passed 17/17 on 2026-10-10, but desktop packaging check, installer SHA256, tag, and push are still pending and must not be described as done.
 - Every new table and endpoint still satisfies the evidence rule: a fact column is nullable and means unknown, never zero.
 - No rate, score, rank, weight, or confidence column is introduced into the Registry or Planner.
 - No currency conversion is introduced.

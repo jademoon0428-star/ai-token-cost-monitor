@@ -4,6 +4,56 @@ All notable changes to AI Cost Management, newest first.
 
 Derived from the git history. Released versions are frozen; the `[Unreleased]` section is additive and does not modify them.
 
+## [1.5.5] — 2026-10-10
+
+Declared AI resources inventory, AI Registry startup baseline seeding, richer Planner AI-option state, the Planner five-plan comparison view (M1), empty/error-state polish, the commercial 90-day lifecycle with the Planner Advanced gate, and user-facing error-message cleanup. Schema changes are additive and applied automatically at startup (`declared_ai_resources`, `commercial_state`, and a now-nullable `project_task_ai_options.model_id`); no manual migration is required. Covers commits `af020f0`…`def18c2` (10 commits after the v1.5.4 tag).
+
+### Added — Declared AI resources inventory
+
+- New `declared_ai_resources` table for ways of reaching an AI model that this app cannot verify itself (web subscription, third-party gateway, someone else's account). Free-text provider/model names on purpose; it never becomes a Registry `models` row or an `ai_resources` row; it stores no credential, key, token, or balance.
+- CRUD + archive API under `/api/planner/declarations`, service, repository, and a management panel on `/planner/resources`.
+- `project_task_ai_options.model_id` is now nullable so an option can reference a declared resource; a partial unique index keeps a duplicate declaration from collapsing onto one option.
+- Smoke coverage via `scripts/smoke-planner-declarations.mjs`.
+
+### Added — AI Registry startup baseline
+
+- `instrumentation.ts` calls `ensureAiRegistryBaseline()` on startup: an empty install receives the seeded Registry baseline (same manifest as `npm run seed:registry`) without any manual step. The write is idempotent and never blocks startup.
+- Supersedes the v1.5.1 statement that "the app never seeds at runtime"; `npm run seed:registry` remains available for manual re-seeding.
+- Smoke coverage via `scripts/smoke-registry-baseline.mjs`.
+
+### Added — Planner M1 comparison view
+
+- Project detail gains the five-plan comparison view (M1) built on existing plan, assignment, and productivity facts. Display follows the frozen rules: same-currency values are summed only within a currency, unknown pricing is shown as unknown (never as zero), multi-currency values are listed side by side, and nothing is ranked or labelled cheapest/most expensive.
+
+### Changed — Planner AI-option state enrichment
+
+- Candidate generation derives a per-option resource state (source, registration state, entitlement, availability, pricing, capability) from existing Registry and resource facts, and the Task AI Options panel displays it. Facts only; generation still never filters, scores, or selects.
+
+### Added — Commercial lifecycle and Planner Advanced gate
+
+- New `commercial_state` singleton table and a commercial service with a 90-day full-access window that starts on first real use (Dashboard open posts to `/api/commercial/start`; `first_use_at` is written once and never rewritten).
+- After the window expires, the two Planner Advanced generation services (`generateProjectPlanCombinations`, `generateProjectTaskAiOptions`) refuse with the stable error code `PLANNER_ADVANCED_LOCKED`, mapped to HTTP 402. Free Planner features and all historical reads remain available; nothing is deleted.
+- Smoke coverage via `scripts/smoke-commercial-lifecycle.mjs`; existing Planner smoke scripts updated to stay green.
+
+### Added — Planner Advanced UI lock
+
+- When the API returns `PLANNER_ADVANCED_LOCKED`, the combination-plans card and the Task AI Options panel show a locked notice ("Planner advanced features require a paid plan after the 90-day full-access period.") and hide the corresponding generate button. Every other failure keeps the existing error path. This release contains no in-app payment or unlock flow.
+
+### Fixed — Empty and error states
+
+- `/saving`: the Model spending section now falls back to an empty state instead of rendering a titled blank block.
+- `/ai-activity`: API failures show an error state, distinct from "No reliable AI activity detected."
+- Dashboard Task Session card no longer renders raw API error messages.
+- `/usage/details` and `/budget` empty states gained an "Import official usage export" CTA; `/budget` labels its default amounts as suggested values that are not saved.
+
+### Fixed — Cost and import error messages
+
+- `/costs` and `/usage/import` no longer surface raw API error text to the user; both show fixed, friendly messages and log the original error server-side only.
+
+### Documentation
+
+- Management documents (HANDOFF, daily log, direction/decisions) synced to record the batch state (`def18c2`).
+
 ## [1.5.4] — 2026-10-07
 
 Planner project stages, the Planner Productivity Report (API and UI, read-only), and the Plan Detail resource display-name fix. The only schema change is the new `project_stages` table, created automatically on upgrade; no manual migration is required.

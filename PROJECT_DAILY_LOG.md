@@ -1150,6 +1150,116 @@ Phase 5 发布准备：恢复上下文 → 盘点真实剩余事项 → 收尾 �
 今日工作结束。
 
 
+## 2026-10-10 晚间追加：Batch 3C–4A 发布工程 + 收工文档更新
+
+（上方"下一步"第 3 项发布文件授权已于 Batch 1 执行完毕，本段覆盖其后进展。）
+
+### Batch 3C–3D：DDF 清单生成器建立与加固
+
+- 新建 `scripts/generate-package-ddf.mjs`：内存全量校验后写盘；`--check` 只读双向集合
+  比对；`desktop/installer/package.ddf` 1737 → 1817 条，与 `.desktop-package` 精确一致。
+- 验证顺序：旧 ddf `--check` 按预期失败（缺 113/多 33）→ 生成 → `--check` 通过；
+  再生成 SHA256 字节级不变；独立 PowerShell 核对 7 项全过。
+- 3D 只读审查修复 3 处：解析器放行任意点号行（改为 13 行头部逐行相等校验）、
+  static 目录缺失裸异常（加守卫）、新增 `--root` 供临时目录测试。临时目录 15 断言全过，
+  未触碰真实包与真实 ddf 哈希。
+
+### Batch 3E：CAB 临时试制
+
+- makecab 5.00 于 `Temp\opencode\cab-trial-1.5.5` 试制：exit 0，1817 文件，
+  CAB 32,485,519 字节；`tar -tf` 清单与 DDF 大小写不敏感双向一致（缺 0/多 0/重 0），
+  禁运 0；v1.5.4 发布目录前后指纹一致。试制产物留临时目录，未进入 release/。
+
+### Batch 4A：smoke:deepseek 只读根因确认
+
+- 调用链与写序逐行核实：脚本仅内置模块、硬编码开发库路径、无应用副作用；
+  失败在首条 provider INSERT，autocommit 下零逻辑残留；4 条 INSERT 互不原子属
+  结构性风险（本次未触发）。
+- 只读 SQL 证据：provider 唯一约束成立且仅 1 行、5 模型关联完整、fixture usage/cost
+  双缺、25 条 official_export 关联完整、integrity ok。
+- 方案 B（幂等化 + 事务）列为推荐，未授权，未执行任何修复。
+
+### 收工纪律
+
+- 未运行 smoke / build / 打包 / makecab 正式链路；未读写数据库；未执行任何 git
+  提交类操作；仅更新约定五文档（WORKING_AGREEMENT / DIRECTION /
+  TIMELINE / DAILY_LOG / HANDOFF），未改源码、package.json、ddf、发布产物。
+- 协作规则改进已写入 PROJECT_WORKING_AGREEMENT.md §16（任务规划 / 验证原则 /
+  协作方式三组），其余文档按各自职责引用，不整段复制。
+
+今日工作结束（第二次）。
+
+
+## 2026-10-10 深夜追加：Batch 4B–4G deepseek 修复收口 + 门禁回绿 + 文档一致性审查
+
+（上方"方案 B 未授权"与"未重跑 smoke"的表述自本段起被取代，原文保留作历史。）
+
+### Batch 4B–4D：deepseek 修复实施与默认隔离
+
+- 4B：`scripts/deepseek-db-smoke-test.mjs` 单文件修复——provider/model 按 id 幂等复用、
+  冲突显式报错（引用占用方 id，不改既有数据）、fixture 存在时全量身份校验
+  （source/accuracy/token/成本）、四写入 BEGIN/COMMIT/ROLLBACK 单事务；
+  新增 `--db` 显式路径；临时库 13/13 PASS（含触发器注入中途失败全回滚）。
+- 4C：只读收口审查；决定门禁接入走"脚本内建默认隔离"（package.json 零改动）。
+- 4D：无 `--db` 时 mkdtemp 创建隔离临时库（TEMP/TMP 重定向验证生效），成功清理、
+  失败保留并打印绝对路径；参数非法显式失败、**删除了回退真实开发库的默认路径**；
+  独立驱动 22/22 PASS；真实库三件套前后一致。
+
+### Batch 4E–4F：门禁回归
+
+- 4E：`npm run smoke:deepseek` PASS（exit 0，cost 507400 与期望一致）；
+  真实库 db/wal/shm hash+size+mtime 不变；只读内容核验与 4A 快照一致；临时目录零残留。
+- 4F：完整 17 项门禁（14 npm + 3 直跑）**17/17 PASS**（总耗时约 18s，无中断无重跑）；
+  真实库三件套前后一致；除 deepseek 自动清理外，其余 13 个 smoke 按仓库约定各遗留
+  1 个前缀临时目录（v14-* / r*- * / c-registry-baseline-* / declared-resources-* /
+  commercial-lifecycle-*），未清理、未经授权不得清理。
+- 边界：Smoke 全绿不代表发布完成——正式打包、Setup、安装测试、产物与 SHA256、
+  commit/tag/push 均未执行。
+
+### Batch 4G：五文档一致性收口
+
+- 审查 HANDOFF / DAILY_LOG / DIRECTION / RELEASE_NOTES / PROJECT_STATUS；
+  仅更新过时/缺失处（HANDOFF 追加取代块、DIRECTION 待决项关闭、RELEASE_NOTES 与
+  PROJECT_STATUS 的"门禁未验证"表述修正），历史记录全部保留。
+
+今日工作结束（第三次）。
+
+
+## 2026-10-10 收尾追加：Batch 4H–4I 发布前只读审查 + 当日总结
+
+（用户在 4I 之后决定当日到此、仅收尾文档；正式发布链未授权、未执行。）
+
+### Batch 4H：正式发布链只读风险审查
+
+- 逐环节核实发布链真实实现：`package:desktop`（重跑 build → 整删重建 `.desktop-package`，
+  内含 csc 编译 launcher）、ddf 生成器双模式、makecab（ddf 内绝对源路径，于 release 目录内
+  执行）、Setup（bootstrapper.cs 手动 csc，无脚本）、README/SHA256SUMS（手动，v1.5.4 格式
+  为模板）、RELEASE_NOTES 回填位（v1.5.5 节末无占位行，按 v1.5.4 先例追加 Setup 单行）。
+- 结论：**无 P0**；三项 P1 程序性风险——①S1→S2 顺序与 BUILD_ID 联动；②S5–S7 手动步骤
+  无脚本、须严格比照 v1.5.4；③失败残留清理须获授权后谨慎执行。
+- 禁运与数据安全三层防线核实（包脚本删 data/ + 全树扫描；ddf 生成器禁 data/ 与 *.db*；
+  3E 试制 tar 实证禁运 0）；打包链从不读真实数据库；smoke 临时目录在 %TEMP% 结构上不可入包。
+  3E 为试制证据，**不冒充正式发布验证**。
+
+### Batch 4I：正式发布前置条件复核（全只读）
+
+- 版本 1.5.5；makecab=`C:\Windows\system32\makecab.exe`；csc 存在于
+  `Framework64\v4.0.30319`；`release\AI-Cost-Management-v1.5.5\` 当时不存在
+  （4J 收尾复核仍不存在）；v1.5.4 目录四件套命名逐字符确认。
+- 工作树文件集合与 4H 结束时一致，四份未跟踪文档与生成器脚本原样保留。
+- 交付 S1–S9 最终命令清单（每步副作用/验证条件/失败停止条件）与 Git 授权边界
+  （S1–S8 不含任何 git 写操作；commit/tag/push 另行授权）。
+
+### 当日总结（4B → 4J）
+
+- 已闭环：deepseek 修复+默认隔离（22/22 + npm 单跑 + 17/17 门禁）、真实库全程未变、
+  DDF 生成器与 1817 条清单、发布链风险审查、前置条件复核、五文档两次一致性收口（4G+4J）。
+- 未执行：正式发布链 S1–S9 全部、release 目录创建、SHA 回填、commit/tag/push。
+- 待决：发布策略（全干净链〔推荐〕 vs 复用现存包）、发布链授权、finalize 范围、tag/push 时点。
+
+今日工作结束（第四次，日终）。
+
+
 ---
 
 # 工作原则
