@@ -1,6 +1,6 @@
 # Project Status
 
-Snapshot of the repository at commit `def18c2` (2026-10-10), prepared for the v1.5.5 release. Documentation only — no code was changed to produce this file. v1.5.5 is prepared on `master` but is **not yet released**: the full smoke gate passed 17/17 on 2026-10-10, while desktop packaging, installer SHA256, and tag are still pending.
+Snapshot of the repository after the v1.5.5 release (2026-10-11). Documentation only — no code was changed to produce this file. v1.5.5 is **released**: commit `40a0996` (`release: prepare AI Cost Management v1.5.5`), tag `v1.5.5`, pushed to GitHub master, GitHub Release created. The full smoke gate passed 17/17 on 2026-10-10; official packaging, installer SHA256, install validation, and manual testing all completed on 2026-10-11.
 
 ## Stage
 
@@ -17,11 +17,11 @@ Operating principles, in priority order:
 
 | Field | Value |
 | --- | --- |
-| `package.json` version | `1.5.5` (prepared, not yet tagged or packaged) |
-| Last released | v1.5.4 (`bc47a9a`, 2026-10-07) |
-| Branch | `master` (10 commits ahead of `origin/master`, not yet pushed) |
+| `package.json` version | `1.5.5` (released; tag `v1.5.5` → `40a0996`) |
+| Last released | v1.5.5 (`40a0996`, tag `v1.5.5`, GitHub Release created, 2026-10-11) |
+| Branch | `master` (pushed to GitHub master; in sync with origin) |
 
-v1.5.4 is the current release (Planner project stages, Productivity Report, Plan Detail display-name fix). v1.5.5 is prepared on `master` and covers the commits after the v1.5.4 tag; it has not been tagged, packaged, or pushed.
+v1.5.5 is the current release (Declared AI resources inventory, AI Registry startup baseline, Planner AI-option state, Planner M1 comparison view, Commercial lifecycle + Planner Advanced gate and lock UI, empty/error state fixes; commits `af020f0`…`40a0996`). v1.5.4 (`bc47a9a`, 2026-10-07) remains available in git history.
 
 ## What is released and stable
 
@@ -37,6 +37,7 @@ v1.5.4 is the current release (Planner project stages, Productivity Report, Plan
 | v1.5.2 | Budget page query fix and official-cost integrity hardening. No schema change. |
 | v1.5.3 | Task Sessions connected to usage attribution. |
 | v1.5.4 | Planner project stages, Planner Productivity Report (read-only), Plan Detail resource display-name fix. New `project_stages` table, created automatically. |
+| v1.5.5 | Declared AI resources inventory, AI Registry startup baseline, Planner AI-option state, Planner M1 comparison view, Commercial lifecycle + Planner Advanced gate (90-day full access) and lock UI, empty/error state and cost/import error messaging fixes. New `declared_ai_resources` and `commercial_state` tables, created automatically. |
 
 ## What shipped in v1.5.1
 
@@ -108,14 +109,57 @@ Additional validation and maintenance scripts (`validate-*.mjs`, `test-local-par
 ## Release preparation status (2026-10-10, end of day)
 
 - The DeepSeek DB smoke was fixed and now isolates by default: no-argument runs use a fresh `mkdtemp` temp database (cleaned on success, kept with its absolute path printed on failure); `--db <path>` is the only way to target a specific database, and malformed arguments fail loudly instead of touching the development database. Isolation suite 22/22 PASS; `npm run smoke:deepseek` PASS; the development database (db/wal/shm hash, size, mtime; integrity ok; providers 4, DeepSeek models 5, official_export usage/cost 25/25, fixture 0/0) was unchanged. Test tooling only — no product or business data was modified.
-- The DDF generator (`scripts/generate-package-ddf.mjs`, currently untracked) supports deterministic generation and a read-only `--check`; isolated tests 15/15 PASS. `desktop/installer/package.ddf` holds 1817 entries; a temporary CAB trial matched the archive bidirectionally with zero forbidden files. The trial is **not** an official v1.5.5 artifact.
+- The DDF generator (`scripts/generate-package-ddf.mjs`, committed in `40a0996`) supports deterministic generation and a read-only `--check`; isolated tests 15/15 PASS. `desktop/installer/package.ddf` holds 1817 entries; a temporary CAB trial matched the archive bidirectionally with zero forbidden files. (Correction, v1.5.5 release: the official DDF was regenerated against the release-day package and `--check` passed; the earlier trial is superseded by the official CAB.)
 - Read-only pre-release work completed: a risk review (no P0; three P1 process risks: package-before-DDF ordering, manual Setup/README/SHA256SUMS steps, cautious failure cleanup) and a precondition check (tool paths, v1.5.4 naming, `release\AI-Cost-Management-v1.5.5\` absent).
-- The user stopped here for the day. The official release chain (fresh `package:desktop`, official DDF/CAB/Setup/README/SHA256SUMS, SHA256 backfill, install validation, commit, tag, push) has **not** been authorized or executed. The 13 temp directories left by other smoke scripts (repo convention) are not cleaned and must not be cleaned without authorization.
+- The user stopped here for the day. The official release chain (fresh `package:desktop`, official DDF/CAB/Setup/README/SHA256SUMS, SHA256 backfill, install validation, commit, tag, push) was **not** authorized or executed at that time (superseded by the Release completion section below). The 13 temp directories left by other smoke scripts (repo convention) are not cleaned and must not be cleaned without authorization.
+
+## Release completion (2026-10-11)
+
+- The full clean release chain S1–S9 was executed under step-by-step authorization: fresh `package:desktop` (Package verified; no `data/` in the package; BUILD_ID `lnVtZ1FuHRMtX-YGjTnWQ`), official DDF regenerated (1817 entries) with `--check` passing against the release-day package, official makecab, Setup compiled with csc, `README.txt`, `SHA256SUMS.txt`, installer SHA256 backfilled into `RELEASE_NOTES.md`, and `makecablog.txt`/`setup.inf` removed.
+- Official artifacts: `release\AI-Cost-Management-v1.5.5\` containing `AI-Cost-Management-Setup.exe`, `AI-Cost-Management-Payload.cab`, `README.txt`, `SHA256SUMS.txt`. Setup.exe SHA256: `C8403A4D9276D2636D3EF1844865D5404F8DFB3B3DA24AE2102FA705C5F128EF`.
+- Committed `40a0996` (`release: prepare AI Cost Management v1.5.5`), tagged `v1.5.5`, pushed to GitHub master, GitHub Release created.
+- Install validation: Setup installed to `%LOCALAPPDATA%\AI-Cost-Management\App`; installed version `1.5.5`, BUILD_ID `lnVtZ1FuHRMtX-YGjTnWQ`; launcher started; Dashboard / Usage / Planner / Budget / AI Activity all returned HTTP 200 with no startup errors; SQLite data directory (`%APPDATA%\AI-Cost-Management\data`) created/active. The installation was kept (not uninstalled).
+- Released-build manual testing: completed, all PASS.
+
+## Next phase: post-release operations (2026-10-11)
+
+The product has entered the **post-release operations preparation phase**. Next priorities:
+
+1. Build the product website. (Done — MVP committed to `master` as `4418e48` on 2026-10-13 and deployed to GitHub Pages; see "Website launch (2026-10-13)" below. Search indexing and promotion remain open.)
+2. Create a product introduction page.
+3. Prepare user acquisition channels.
+4. Collect feedback from real users.
+
+Long-term directions recorded, **not scheduled and not part of v1.5.5**:
+
+- **Personalized AI plan optimization engine** — optimize model-combination suggestions, free/paid model substitution advice, and AI usage-efficiency analysis from local usage history, model choices, token consumption, task types, cost trends, and time efficiency. Deferred until launch and real-user validation are done; must respect the no-ranking/no-score/no-fake-precision red lines when it is eventually built.
+- **Subscription Cost Model** — manual entry of subscriptions (ChatGPT Plus, Claude Pro, Gemini Advanced, GitHub Copilot, and other monthly/annual plans), monthly fixed AI cost, merged with API cost, total AI investment. Today the product covers API token cost, model call cost, and local detection/analysis only. Not entering the v1.5.5 wrap-up.
+- **Marketing channels** — a GitHub Release is a technical distribution channel only; growth requires the website, introduction articles, AI communities, developer communities, software-directory submissions, and content marketing. Large AI models will not discover the product on their own; search indexing, reviews, external articles, and community exposure are needed.
+
+Explicitly deferred: optimization engine development, Subscription Cost Model development, and large-scale feature expansion.
+
+## Post-release website work (2026-10-12)
+
+- An English-language static one-page website MVP now exists locally in `website/` (`index.html` + `styles.css`). It is standalone static content — not a product feature, not a version release, and not part of v1.5.5. No npm dependencies, scripts, external fonts/CDN, analytics, or third-party images were added; the main content does not depend on JavaScript. The hero visual is a clearly labelled UI schematic, not a product screenshot and not real user spend data.
+- Links point to the verified GitHub repository, the v1.5.5 Release, and the installer: `https://github.com/jademoon0428-star/ai-token-cost-monitor/releases/download/v1.5.5/AI-Cost-Management-Setup.exe` — Setup.exe SHA256 `C8403A4D9276D2636D3EF1844865D5404F8DFB3B3DA24AE2102FA705C5F128EF`.
+- Integrity checks (this session's output): exactly one `meta name="description"`, one `meta property="og:description"`, and one `h1`; the six superseded copy strings are all absent; no old/new copy pairs are retained together; HTML tags are balanced; 12 ids are unique.
+- Playwright: 24/24 PASS at 360px and 1280px — empty external-request list for the page, no page errors, no horizontal overflow, single h1, stylesheet loads, 8 FAQ items, keyboard operable, download URL and SHA-256 displayed correctly. The empty external-request list describes this page only and must not be read as the product being fully offline (AI Activity may perform reverse DNS lookups; the optional provider connectivity test contacts that provider's API when the user triggers it). No browser-to-GitHub end-to-end download test was run, so the download flow is not claimed as end-to-end verified.
+- Product source, database, and release assets were **not** modified by this website work. The website is not deployed and not committed. The workspace is **not** clean: the pre-existing uncommitted modifications to the five tracked management documents and the untracked management/design documents remain in place, plus the new untracked `website/` directory.
+  (Update, 2026-10-13: superseded — the website is now committed to `master` (`4418e48`) and deployed; see the launch section below.)
+
+## Website launch (2026-10-13)
+
+- The static website is **live on GitHub Pages**: https://jademoon0428-star.github.io/ai-token-cost-monitor/
+- Deployment: the `gh-pages` branch holds `index.html` + `styles.css` at the repository root (Pages source: `gh-pages` / root). `master` was not modified by the deployment; the canonical source remains `website/` on `master`. Website content updates require syncing both branches (`website/` on `master` → root of `gh-pages`).
+- Git: `4418e48` `docs: add official website static page` (master, exactly `website/index.html` + `website/styles.css`); gh-pages publish commits `f00057a` and `c196f97`, both pushed (`origin/gh-pages` in sync).
+- Acceptance verification (read-only, 2026-10-13): **PASS** — home page HTTP 200; `styles.css` HTTP 200 (`text/css`, relative path, content matches local, zero 404 resources, zero external assets, no `src` elements); download link resolves to the v1.5.5 Release asset (HEAD 200) and the release page returns 200; single `h1`, 8 FAQ items, privacy and product-intro sections render correctly; promotional-boundary scan clean (no real-time-monitoring, auto-block, unimplemented-platform, or auto-recommendation claims — the only "real-time monitor" match is the FAQ question whose answer is "No.").
+- Not claimed: a browser end-to-end download → SHA256 re-check was not run during this verification, matching the page's own disclosure.
+- Forward notes: website animation/demo additions are **post-v1.5.5 website enhancements** and are not part of the current version; SaaS, account-system, and enterprise-feature scope expansion remains out of scope.
 
 ## Definition of done for the next release
 
 - v1.5.4 shipped on 2026-10-07 (tag → `bc47a9a`), with release notes that match `docs/CHANGELOG.md`.
-- v1.5.5 (commits `af020f0`…`def18c2`) is prepared on `master`: version files updated and the full smoke gate passed 17/17 on 2026-10-10, but desktop packaging check, installer SHA256, tag, and push are still pending and must not be described as done.
+- v1.5.5 shipped on 2026-10-11: commit `40a0996`, tag `v1.5.5`, pushed to GitHub master, GitHub Release created, release notes matching `docs/CHANGELOG.md`; desktop packaging verified, installer SHA256 recorded, install validation and released-build manual testing all PASS.
 - Every new table and endpoint still satisfies the evidence rule: a fact column is nullable and means unknown, never zero.
 - No rate, score, rank, weight, or confidence column is introduced into the Registry or Planner.
 - No currency conversion is introduced.

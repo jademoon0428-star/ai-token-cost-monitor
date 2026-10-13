@@ -1262,6 +1262,265 @@ Phase 5 发布准备：恢复上下文 → 盘点真实剩余事项 → 收尾 �
 
 ---
 
+# 2026-10-11
+
+## 工作目标
+
+v1.5.5 正式发布：状态恢复 → 正式发布链 S1–S9 → 安装验收与人工测试 → 文档同步与上线规划记录。
+
+## 完成内容（按批次）
+
+### 1. Batch 5A：只读状态恢复
+
+- 只读读取五份核心文档（HANDOFF / DAILY_LOG / DIRECTION / RELEASE_NOTES / PROJECT_STATUS），
+  确认 v1.5.5 发布准备状态与唯一推荐下一步（发布策略决策 → 全干净链）。
+- 未执行任何操作。
+
+### 2. 正式发布链 S1–S9（全干净链，逐步授权执行）
+
+- **S1** `npm run package:desktop`：exit 0；next build 25/25 页面；Package verified 成功
+  （launcher 5120 字节、runtime node v24.20.0 x64、`standalone/data` absent）；
+  `.desktop-package` 存在；BUILD_ID = `lnVtZ1FuHRMtX-YGjTnWQ`。
+- **S2** `node scripts/generate-package-ddf.mjs`：exit 0，1817 文件条目写入
+  `desktop/installer/package.ddf`，build id 读取为 `lnVtZ1FuHRMtX-YGjTnWQ`。
+- **S3** `--check`：exit 0，generated 1817 = existing 1817，集合匹配通过。
+- **S4** 正式 makecab（`release\AI-Cost-Management-v1.5.5\` 内，系统 makecab.exe）：exit 0，
+  `AI-Cost-Management-Payload.cab` 32,503,105 字节（压缩 115,009,184 → 32,307,994，
+  80.84 秒），makecablog.txt 与 setup.inf 生成。
+- **S5** csc 编译 Setup：exit 0，`AI-Cost-Management-Setup.exe` 7,168 字节。
+- **S6** README.txt：按 v1.5.4 格式生成（版本 1.5.5、Build ID `lnVtZ1FuHRMtX-YGjTnWQ`、
+  变更摘要含 DeepSeek smoke 隔离修复〔test tooling only〕、Planner/资源生命周期稳定性更新、
+  发布门禁通过；未夸大未完成、未写已发布/tag）。
+- **S7** SHA256SUMS.txt：CAB / Setup / README 三行（大写 SHA256 + 两空格 + 文件名）；
+  首次写入行尾格式有误（三行被拼接），已立即修正为标准逐行。
+- **S8** RELEASE_NOTES.md v1.5.5 节末追加 Installer SHA256
+  （Setup.exe `C8403A4D9276D2636D3EF1844865D5404F8DFB3B3DA24AE2102FA705C5F128EF`），
+  仅改该文件。
+- **S9** 删除 makecablog.txt / setup.inf；发布目录最终四件套（与 v1.5.4 结构一致）。
+
+### 3. Batch 4L：安装验收 + 人工测试
+
+- Setup 安装成功 → `%LOCALAPPDATA%\AI-Cost-Management\App`。
+- 安装内容：version `1.5.5`、standalone BUILD_ID `lnVtZ1FuHRMtX-YGjTnWQ`（与 S1 一致）。
+- Launcher 启动成功；本地服务 `127.0.0.1:57817` 监听正常，server.js 进程运行。
+- 核心页面实测：Dashboard / Usage / Planner / Budget / AI Activity 全部 HTTP 200、
+  无错误模式。
+- SQLite 数据目录正常（`%APPDATA%\AI-Cost-Management\data` 三件套，连接已建立）。
+- 按指令未卸载，安装结果保留。
+- 发布版本人工测试：已完成，全部 PASS。
+
+### 4. 发布收口（Git 与 GitHub，由用户执行并授权记录）
+
+- commit：`40a0996` release: prepare AI Cost Management v1.5.5
+  （4 个版本文件 + package.ddf + 生成器脚本 + deepseek 脚本 + 管理文档一并入库）。
+- tag：`v1.5.5` → `40a0996`。
+- 已 push 至 GitHub `master`（本地与 origin 同步）。
+- GitHub Release 已创建完成。
+
+### 5. 五文档同步（本记录批次）
+
+- 同步 HANDOFF（新增第十九节）、DAILY_LOG（本节）、DIRECTION（新增 §16 + §8 状态更新）、
+  RELEASE_NOTES（v1.5.5 Release Status 改为 Released）、docs/PROJECT_STATUS
+  （版本状态、发布完成记录、下一阶段规划）。
+- 仅改这 5 个文件；未改源码、未跑 npm/build/smoke/test、未执行 git 操作、未新增文档。
+
+## 新增长期方向记录（只记录，v1.5.5 不实现）
+
+1. **产品上线阶段**：进入「发布后运营准备阶段」。重点：产品官网、产品介绍页面、
+   用户获取渠道、真实用户反馈收集。
+2. **个性化 AI 方案优化引擎**（长期）：依据本机使用历史/模型选择/Token 消耗/任务类型/
+   成本变化/时间效率，优化模型组合推荐、免费/付费替代建议、AI 使用效率分析。
+   当前不实现——优先上线与真实用户验证。
+3. **Subscription Cost Model**（长期）：当前覆盖 API Token 成本、模型调用成本、本地检测；
+   暂未支持 ChatGPT Plus / Claude Pro / Gemini Advanced / GitHub Copilot 等包月订阅。
+   未来考虑手动录入订阅、月度固定成本、与 API 成本合并、真实 AI 总投入。
+   当前不进入 v1.5.5 收尾。
+4. **商业与推广**：GitHub Release 只是技术发布渠道；增长需要官网、介绍文章、AI 社区、
+   开发者社区、软件目录、内容营销；大模型推荐不可依赖，需要官网/搜索索引/评价/
+   外部文章/社区曝光。
+
+## 今日纪律
+
+- 发布链各步严格按授权顺序执行，失败即停、不自动重试；未重复验证已通过的步骤。
+- 除授权的发布产物与 5 份文档外，未修改任何文件；未做额外性能测试/UI 回归/代码检查。
+- 未清理任何临时目录（%TEMP% 13 个 smoke 目录保留）；试制 CAB 仍在
+  `Temp\opencode\cab-trial-1.5.5`。
+
+## 下一步
+
+1. **官网建设规划 + 上线推广准备**（下次会话入口）。
+2. 不提前进入：自动优化引擎开发、Subscription Cost Model 开发、大规模功能扩展。
+
+今日工作结束。
+
+
+---
+
+# 2026-10-12
+
+## 工作目标
+
+v1.5.5 发布后收尾第一步：英文静态官网 MVP（`website/`）建设、只读审阅与完整性验证；
+当日规则确认后完成五文档收尾同步。
+
+## 完成内容（按批次）
+
+### 1. 官网事实核验与预检（只读）
+
+- 通过 GitHub REST API 复核 v1.5.5 Release：公开、非草稿、2026-10-11T06:25:40Z 发布；
+  下载地址 `https://github.com/jademoon0428-star/ai-token-cost-monitor/releases/download/v1.5.5/AI-Cost-Management-Setup.exe`；
+  Setup.exe 7,168 字节，SHA256 `C8403A4D9276D2636D3EF1844865D5404F8DFB3B3DA24AE2102FA705C5F128EF`
+  （与本地 `release\AI-Cost-Management-v1.5.5\` 复算一致）。
+- 预检：工作区基线 5 M + 4 个未跟踪文档；`website/` 不存在；Playwright 浏览器可用。
+- 仓库无 LICENSE、`package.json` 无 `license` 字段 → 官网不声称开源、不推断许可。
+
+### 2. 官网 MVP 撰写（仅 2 个文件）
+
+- `website/index.html` + `website/styles.css`：英文静态单页，导航 / Hero / 痛点 /
+  核心功能 / 隐私与网络说明 / 下载 / FAQ（8 项）/ 页脚。
+- 纯静态 HTML/CSS：系统字体、静态 CSS，主体内容不依赖 JavaScript 展示；
+  未新增 npm 依赖、脚本、外部字体/CDN、分析工具、第三方图片。
+- Hero 视觉为明确标注的 UI schematic（"UI schematic — not a screenshot"），
+  非伪造产品截图、非真实用户消费数据。
+- 链接指向已核实的 GitHub 仓库、v1.5.5 Release 与安装程序（仅 3 条 github.com 导航外链）。
+- 官网属独立静态页面：不是产品功能开发，不构成新版本发布。
+
+### 3. 静态检查与最终只读审阅
+
+- 误导性话术扫描：命中项均为否定式披露 / CSS 类名 / 受众描述，无肯定式夸大。
+- 外部资源扫描：0 `<script>`、0 外部 src/@import/字体/CDN。
+- 只读审阅修正 6 处（仅改 `website/index.html`）：Hero 绝对化隐私表述、痛点文案避免暗示
+  跨全提供商自动汇总、价格注册表注明随版本打包且不承诺自动/实时更新、API Key FAQ 区分
+  核心功能与主动触发的可选连接测试、隐私"never uploaded"改为代码审查口径、H1 去掉完整性暗示。
+
+### 4. 最终完整性检查（当日执行输出）
+
+- `meta name="description"` 1 个；`meta property="og:description"` 1 个；`h1` 1 个。
+- 指定 6 项旧文案（keeps every byte / no single place that adds it up / Know exactly /
+  Your data stays on your machine / never uploaded / All core features）全部未命中。
+- 关键新文案各 1 处，未发现旧段落与新段落并存；HTML 标签配对无异常；12 个 id 无重复。
+
+### 5. Playwright 双视口验证（360px / 1280px，共 24/24 PASS）
+
+- 外部请求列表为空（仅 `file://` 页面资源）；无页面错误；无水平溢出；单一 h1；
+  样式表加载正常；FAQ 共 8 项、键盘可开合（首个 Tab 焦点为 skip-link）；
+  下载地址与 SHA-256 显示正确。
+- 边界：外部请求为空仅描述该页面浏览器请求，**不等同于产品完全不联网**
+  （AI Activity 可能执行反向 DNS 查询、可选连接测试会联系相应 API，见官网隐私说明）。
+- 未做浏览器 → GitHub 的下载端到端测试，**不声称下载流程已端到端验证成功**。
+
+## Git 状态
+
+- 新增未跟踪 `website/`（index.html、styles.css）；本轮收尾仅改 5 份授权文档，
+  其中 RELEASE_NOTES.md 保留原状（官网工作不写入产品发布说明）。
+- 既有 5 M 与 4 个未跟踪文档保持原状；未执行 git add/commit/push；未部署；
+  未改产品源码、数据库与发布资产。工作区不干净（既有未提交修改与未跟踪文件仍在）。
+
+## 重要决定（官网文案边界，2026-10-12 确认）
+
+- 不声称：开源、永久免费、完全离线、零网络、实时/后台监控、自动阻止超预算消费、
+  推送通知、100% 检测准确、覆盖所有模型、自动成本优化。
+- 隐私精确区分：未发现上传使用量或成本数据的代码；未发现分析或崩溃报告代码；
+  AI Activity 扫描可能执行反向 DNS 查询；用户主动触发的可选提供商连接测试会联系相应 API。
+- 价格注册表：随当前版本打包的价格信息，不承诺自动或实时更新。
+- 活动检测 ≠ 实际消费记录（AI Activity 只是本地活动证据）。
+- 许可证、最低 Windows 版本、安装包签名与 SmartScreen 状态未确认，不自行推断。
+
+## 今日纪律
+
+- 只改 `website/` 与 5 份授权文档；未跑 npm/build/smoke/test；收尾阶段未重跑已通过的检查。
+- 未执行任何 git 写操作；未清理工作区；保护既有未提交修改与未跟踪文件。
+
+## 下一步
+
+1. 官网后续（等待授权）：真实产品截图（干净测试数据）替换 schematic、托管上线决策、
+   浏览器 → GitHub 下载端到端验证（需 github.com 可达环境）。
+2. 不提前进入：个性化 AI 优化引擎、反馈闭环、更广泛的资源推荐改进、
+   Subscription Cost Model、大规模功能扩展。
+
+今日工作结束。
+
+
+---
+
+# 2026-10-13
+
+## 工作目标
+
+v1.5.5 官网发布收尾：官网入库、gh-pages 上线、验收与发布阶段关闭记录。
+
+## 完成内容
+
+### 1. 官网入库（master）
+
+- `4418e48` docs: add official website static page —— 精确暂存仅
+  website/index.html + website/styles.css（2 files, 705 insertions），
+  未夹带任何管理文档与其他文件。
+
+### 2. gh-pages 发布分支
+
+- `f00057a` docs: publish website；`c196f97` docs: remove website subdirectory
+  from gh-pages publish tree。gh-pages 根目录仅 index.html + styles.css，
+  两提交均已 push（origin/gh-pages 同步）。**master 未修改。**
+
+### 3. GitHub Pages 上线
+
+- URL：https://jademoon0428-star.github.io/ai-token-cost-monitor/
+- 部署方式：gh-pages 分支根目录部署（Pages source = gh-pages / root）；
+  master 的 website/ 为规范来源，内容更新需双分支同步。
+
+### 4. 官网验收（只读验证）：PASS
+
+- 首页 HTTP 200（16,213 bytes）；styles.css HTTP 200（text/css，
+  8,515 bytes，内容与本地一致）。
+- 资源：0 个 src 资源、0 外部 CDN/字体/图片；唯一外部引用为 3 条 github.com
+  链接；无 404。
+- 下载链接：`releases/download/v1.5.5/AI-Cost-Management-Setup.exe` HEAD 200；
+  Release 页 200。
+- 页面结构：单一 h1；FAQ 8 项；隐私说明与产品介绍渲染正常。
+- 宣传边界扫描：无"实时监控所有 AI / 自动阻止费用 / 未实现平台支持 /
+  自动推荐最佳模型省钱"声称；唯一 "real-time monitor" 命中为 FAQ 问句、
+  答案 No（合规）。
+- 未做浏览器点击 → 下载 → SHA256 端到端测试，不声称（与页面披露一致）。
+
+### 5. 分支切换期间的管理文档保护
+
+- gh-pages 制作期间，5 个管理文档修改 + 4 个未跟踪文档经 `git stash`
+  （"temp before gh-pages publish"）暂存；本日 checkout master → stash pop
+  恢复，基线 5 M + 4 未跟踪完整无损；gh-pages 根目录残留的 index.html /
+  styles.css 随 checkout 自动清理。
+
+## Git 状态
+
+- master：HEAD `4418e48`，ahead origin/master 1（未 push，等待授权）。
+- gh-pages：`c196f97`，与 origin/gh-pages 同步。
+- 工作区：5 M 管理文档（含本轮更新的 3 份）+ 4 个未跟踪文档；
+  RELEASE_NOTES.md 按约定未改。
+
+## 重要决定
+
+- RELEASE_NOTES.md 不写入官网发布记录（沿用 2026-10-12 约定：
+  官网不写入产品发布说明），经用户本次确认。
+- 官网动画演示属于 post-v1.5.5 官网增强，不纳入当前版本。
+- 暂不扩展 SaaS、账号系统、企业功能等范围。
+
+## 今日纪律
+
+- 本轮仅改 3 份文档；未改源码、package.json、release/ 文件；未 commit
+  （等待用户检查 diff）；未重复已通过的验收。
+- checkout / stash 属受限操作，经用户明确授权后执行。
+
+## 下一步（等待用户决定）
+
+1. 检查本轮 3 份文档 diff，决定提交方式。
+2. master（`4418e48`）push 授权决定。
+3. 官网后续增强（动画演示等，post-v1.5.5）与推广动作另行决策。
+
+今日工作结束。
+
+
+---
+
 # 工作原则
 
 以后每天结束必须更新：

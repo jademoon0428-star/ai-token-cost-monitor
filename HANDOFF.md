@@ -2,6 +2,8 @@
 
 更新时间：
 
+2026-10-11（第十七更新：v1.5.5 正式发布完成——commit `40a0996`、tag `v1.5.5`、已 push、GitHub Release 已创建；正式产物四件套落库 release 目录；安装验收与人工测试 PASS；进入发布后运营准备阶段；见第十九节）
+
 2026-10-10（第十六更新：组1 §4-3 错误文案已提交 `ddb4df5`、组2 Planner Advanced lock UI 已提交 `6305de6`；源码工作区清零，仅余组3 三份文档未提交；见第十八节 §0）
 
 2026-10-10（第十五更新：Phase 5 只读事实核对 + 本地文档状态同步；§4-3 两页错误文案本地完成未提交；/costs 无入口记为已知限制；见第十八节）
@@ -1321,3 +1323,204 @@ SHA-256 比较六个文件（data/ 与 %APPDATA% 各三件套）：
 3. 决策点二：正式发布链 S1–S9 授权（命令清单在 4I 报告/收尾补充中，逐项含验证与失败停止条件）。
 4. 决策点三：finalize 提交范围与 tag/push 时点。
 5. 勿重新调查：deepseek 根因/修复、ddf 生成器行为、打包禁运防线均已闭环（本块 + 4G 块 + DAILY_LOG 对应批次）。
+
+
+=================================================
+十九、2026-10-11 v1.5.5 正式发布完成（当前以此节为准）
+=================================================
+
+（取代第十八节"下一步入口"中的决策点一/二/三——均已完成。历史原文保留。）
+
+
+## 1. 发布事实（Git 与产物）
+
+- commit：`40a0996` release: prepare AI Cost Management v1.5.5
+- tag：`v1.5.5`（指向 `40a0996`）
+- 已 push：GitHub `master`（本地与 origin 同步）
+- GitHub Release：已创建完成
+- 正式发布产物：`release\AI-Cost-Management-v1.5.5\`（四件套）
+  - AI-Cost-Management-Setup.exe（7,168 字节）
+  - AI-Cost-Management-Payload.cab（32,503,105 字节）
+  - README.txt
+  - SHA256SUMS.txt（CAB / Setup / README 三行，大写 SHA256 + 两空格 + 文件名）
+- Installer SHA256（Setup.exe）：`C8403A4D9276D2636D3EF1844865D5404F8DFB3B3DA24AE2102FA705C5F128EF`
+  （已回填 RELEASE_NOTES.md v1.5.5 节末）
+- 发布相关文件（4 个版本文件、package.ddf、生成器脚本、deepseek 脚本、管理文档）
+  已随 `40a0996` 入库；工作区仅余 4 个未跟踪管理/设计文档。
+
+
+## 2. 正式发布链 S1–S9（全部完成，均有 exit code 证据）
+
+1. S1 `npm run package:desktop`：exit 0，Package verified 成功（`data/` 未入包），
+   构建 BUILD_ID = `lnVtZ1FuHRMtX-YGjTnWQ`。
+2. S2 正式 ddf 再生成：exit 0，1817 条；S3 `--check`：exit 0，
+   BUILD_ID 与当前包一致（非 Batch 2 旧快照）。
+3. S4 正式 makecab（于 release 目录内）：exit 0，Payload.cab 32,503,105 字节。
+4. S5 csc 编译 Setup：exit 0，Setup.exe 7,168 字节。
+5. S6 README.txt（按 v1.5.4 格式，未夸大、未写已发布/tag）、
+   S7 SHA256SUMS.txt（首次行尾格式有误，已立即修正为逐行）。
+6. S8 RELEASE_NOTES 追加 Installer SHA256（仅改该文件；当时按指令未写已发布/tag/已下载
+   表述，发布状态于同日文档同步中按事实更新）。
+7. S9 删除 makecablog.txt / setup.inf，发布目录仅存四件套。
+
+
+## 3. 安装验收（Batch 4L）+ 人工测试
+
+- Setup 安装成功 → `%LOCALAPPDATA%\AI-Cost-Management\App`。
+- 安装内容核验：version `1.5.5`、BUILD_ID `lnVtZ1FuHRMtX-YGjTnWQ`（与 S1 构建一致）。
+- Launcher 启动成功；本地服务 `127.0.0.1` 监听正常，进程运行中。
+- 核心页面 HTTP 200 且无错误模式：Dashboard `/`、Usage `/usage`、Planner `/planner`、
+  Budget `/budget`、AI Activity `/ai-activity`。
+- SQLite 数据目录正常：`%APPDATA%\AI-Cost-Management\data` 三件套存在、连接已建立。
+- 发布版本人工测试：已完成，全部 PASS。
+- 按指令未卸载，安装结果保留。
+
+
+## 4. 当前阶段：发布后运营准备阶段
+
+v1.5.5 已发布，项目进入「发布后运营准备阶段」。
+
+下一步重点（下次会话入口）：
+
+1. 产品官网建设规划 + 上线推广准备。
+2. 创建产品介绍页面。
+3. 准备用户获取渠道。
+4. 收集真实用户反馈。
+
+明确不提前进入：
+
+- 自动优化引擎（个性化 AI 方案优化引擎）开发
+- Subscription Cost Model 开发
+- 大规模功能扩展
+
+
+## 5. 长期方向记录（只记录，当前不实现）
+
+1. **个性化 AI 方案优化引擎**：依据本机使用历史、模型选择、Token 消耗、任务类型、
+   成本变化、时间效率，逐步优化模型组合推荐、免费/付费模型替代建议、AI 使用效率分析。
+   v1.5.5 不实现——优先完成产品上线与真实用户验证。
+2. **Subscription Cost Model**：当前覆盖 API Token 成本、模型调用成本、本地检测与分析；
+   暂未完整支持 ChatGPT Plus / Claude Pro / Gemini Advanced / GitHub Copilot 等包月订阅。
+   未来考虑：手动录入订阅、月度 AI 固定成本、与 API 成本合并分析、真实 AI 总投入。
+   当前不进入 v1.5.5 收尾。
+3. **商业与推广**：GitHub Release 只是技术发布渠道；用户增长需要官网、产品介绍文章、
+   AI 社区发布、开发者社区推广、软件目录提交、内容营销。大型 AI 模型推荐目前不可依赖
+   （ChatGPT/Codex/Gemini 不会自动知道新软件），需要官方网站、搜索索引、用户评价、
+   外部文章、社区曝光。
+
+详版记录见 PROJECT_DIRECTION_AND_DECISIONS.md 新增节（2026-10-11）。
+
+
+## 6. 边界与不变（本轮文档同步）
+
+- 本轮仅更新五份文档（本文件 / DAILY_LOG / DIRECTION / RELEASE_NOTES / docs/PROJECT_STATUS），
+  未改源码、未运行 npm/build/smoke/test、未执行任何 git 操作、未新增其他文档。
+- 已知限制不变：lint 435 基线、/costs 与 /connect 无入口、安装包未签名、
+  /connect 流程未完成、无 Settings/根 404；%TEMP% 13 个 smoke 临时目录未清理。
+- 已闭环勿重查：deepseek 根因/修复、ddf 生成器行为、打包禁运防线、发布链 P1 三项。
+- 浏览器交互测试停止决定维持；不重新安排。
+
+
+## 收工状态更新（2026-10-12：官网 MVP 完成；补充第十九节 §4 下一步重点第 1 项实况，历史保留）
+
+### 当前工作区
+
+- HEAD 仍为 `40a0996`（tag `v1.5.5`）；未 commit、未 push、未部署、未打新 tag。
+- 既有 5 M 未变：HANDOFF.md、PROJECT_DAILY_LOG.md、PROJECT_DIRECTION_AND_DECISIONS.md、
+  RELEASE_NOTES.md、docs/PROJECT_STATUS.md（含此前未提交的修改，原样保留）。
+- 既有 4 个未跟踪文档不变；新增未跟踪 `website/`（index.html、styles.css）。
+- 工作区**不干净**：既有未提交修改 + 未跟踪文件仍在；未执行任何清理。
+
+### 本日完成（官网 MVP，独立静态页面）
+
+- `website/index.html` + `website/styles.css`：英文静态单页（产品介绍 / 核心功能 /
+  隐私与网络说明 / 下载 / FAQ 8 项）。系统字体 + 静态 CSS，主体内容不依赖 JavaScript；
+  未新增 npm 依赖、脚本、外部字体/CDN、分析工具、第三方图片。
+- Hero 为明确标注的 UI schematic（非伪造截图、非真实用户消费数据）。
+- 链接指向已核实的 GitHub 仓库、v1.5.5 Release 与安装程序：
+  - 下载地址：`https://github.com/jademoon0428-star/ai-token-cost-monitor/releases/download/v1.5.5/AI-Cost-Management-Setup.exe`
+  - Setup.exe SHA256：`C8403A4D9276D2636D3EF1844865D5404F8DFB3B3DA24AE2102FA705C5F128EF`
+- 官网工作不是产品功能更新、不是新版本发布；未改产品源码、数据库与发布资产。
+- 本轮收尾仅更新 5 份授权文档，其中 RELEASE_NOTES.md 保留原状（官网不写入产品发布说明）。
+
+### 验证证据（当日执行输出）
+
+- 静态：误导话术扫描无肯定式夸大；外部资源 0（无 script/CDN/外部字体/分析）。
+- 完整性：`meta description` 1、`og:description` 1、`h1` 1；指定 6 项旧文案全部未命中；
+  新旧文案无并存；HTML 标签配对无异常；12 个 id 无重复。
+- Playwright 360px + 1280px 共 **24/24 PASS**：外部请求列表为空、无页面错误、无水平溢出、
+  单一 h1、样式表加载正常、FAQ 8 项、键盘可用、下载地址与 SHA-256 显示正确。
+- 边界：外部请求为空仅指该页面，**不代表产品完全不联网**；未做浏览器 → GitHub
+  下载端到端测试，**不声称下载流程端到端成功**。
+
+### 下次启动必须先读（按顺序）
+
+1. PROJECT_WORKING_AGREEMENT.md（协作与 git 纪律）
+2. PROJECT_DIRECTION_AND_DECISIONS.md（§16 阶段 + §17 当日方向 / 宣传边界 / 协作规则）
+3. HANDOFF.md 本收工块（与第十九节历史并读，本块为最新状态）
+4. PROJECT_DAILY_LOG.md 2026-10-12
+5. docs/PROJECT_STATUS.md（Post-release website work 节）
+
+### 下次从实际剩余收尾事项继续（等待用户授权）
+
+1. 官网后续：真实产品截图（干净测试数据）替换 schematic、托管上线决策（GitHub Pages
+   等，未定）、浏览器 → GitHub 下载端到端验证（需 github.com 可达环境）。
+2. 产品侧既有已知限制不变：lint 435 基线、/costs 与 /connect 无入口、安装包未签名、
+   /connect 流程未完成、无 Settings/根 404、%TEMP% 13 个 smoke 临时目录未清理。
+3. 明确不提前进入：个性化 AI 优化引擎、反馈闭环、更广泛的资源推荐改进、
+   Subscription Cost Model、大规模功能扩展。
+
+### 本轮边界
+
+- 仅改 5 份授权文档（HANDOFF / DAILY_LOG / DIRECTION / docs/PROJECT_STATUS 更新，
+  RELEASE_NOTES 保留原状）；未改 website/ 与其他任何文件；未跑 npm/build/smoke/test；
+  收尾阶段未重跑已通过的 Playwright；未执行任何 git 写操作；未部署。
+
+
+---
+
+## 收工状态更新（2026-10-13：官网上线完成 + v1.5.5 发布阶段收口；接续 2026-10-12 收工块）
+
+### 1. 官网发布完成
+
+- GitHub Pages 已上线可访问：
+  **https://jademoon0428-star.github.io/ai-token-cost-monitor/**
+- 部署方式：**gh-pages 分支**，根目录部署 `index.html` + `styles.css`
+  （Pages source = gh-pages / root）；**master 未因此修改**，规范来源仍是
+  master 的 `website/`。
+- 验收结果（只读验证）：**PASS**
+  - 首页 HTTP 200；`styles.css` HTTP 200（text/css，相对路径，内容与本地一致；
+    0 个 src 资源、0 外部资源、无 404）。
+  - 下载链接指向 v1.5.5 Release：Setup.exe 直链 HEAD 200、Release 页 200。
+  - FAQ 8 项 / 隐私说明 / 产品介绍渲染正常，单一 h1。
+  - 宣传边界检查通过：无"实时监控所有 AI / 自动阻止费用 / 未实现平台支持 /
+    自动推荐最佳模型省钱"声称；唯一 "real-time monitor" 命中为 FAQ 问句、
+    答案为 No（否定式披露，合规）。
+- 未做：浏览器点击 → 完整下载 → SHA256 复核的端到端测试（与页面披露口径一致，
+  不声称）。
+
+### 2. Git 信息
+
+- 官网页面 commit（master）：`4418e48` docs: add official website static page
+  （仅 website/index.html + website/styles.css，2 files / 705 insertions）。
+- gh-pages publish commits：`f00057a` docs: publish website、
+  `c196f97` docs: remove website subdirectory from gh-pages publish tree；
+  均已 push（origin/gh-pages 同步）。
+- master：HEAD `4418e48`，领先 origin/master 1 个提交（**未 push，等待授权**）。
+- 分支切换期间管理文档经 stash 暂存（"temp before gh-pages publish"），
+  本日已恢复（checkout master → stash pop）：工作区基线 5 M + 4 个未跟踪文档
+  完整不变；gh-pages 根目录残留的 index.html/styles.css 已随 checkout 清理。
+
+### 3. 本轮文档更新范围
+
+- 仅更新 HANDOFF.md、PROJECT_DAILY_LOG.md、docs/PROJECT_STATUS.md 三份；
+  **RELEASE_NOTES.md 按约定保留原状**（官网不写入产品发布说明）。
+- 未改源码、package.json、release/ 文件；未 commit（等待用户检查 diff）。
+
+### 4. 后续规划备注
+
+- **官网动画演示属于 post-v1.5.5 官网增强，不纳入当前版本。**
+- **暂不扩展 SaaS、账号系统、企业功能等范围。**
+- 官网内容维护项：版本发布后需同步页面中的版本号 / 文件大小 / SHA256；
+  双分支同步约定（master `website/` → gh-pages 根目录）。
+- 下一步（等待用户决定）：本轮 3 份文档 diff 检查与提交授权；master push 授权。
