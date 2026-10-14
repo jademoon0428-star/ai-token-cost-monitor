@@ -1229,3 +1229,70 @@ v1.5.5 已完成：**Release、安装包、GitHub Release、官网发布、官�
   其中 RELEASE_NOTES.md 按用户本次指示做最小补充（v1.5.5 节末新增 Website 小节，
   不改原发布记录结构），该指示为对 §17.6「RELEASE_NOTES 保留原状」约定的单次覆盖。
 - 未改源码、package.json、release/、website/；未执行 git 操作；未 commit。
+
+---
+
+# 19. 2026-10-14 记录：下载入口一致性修复收口 + 阶段转入用户验证
+
+## 19.1 性质说明
+
+- 今天不是重新发布版本。v1.5.5 已冻结并公开发布；今天修复的是**公开安装说明
+  一致性问题**（文档 / 官网静态内容 / Release 文案层面）。
+- 安装包二进制没有变化：Setup.exe、Payload.cab、SHA256SUMS.txt 资产未变，
+  未重新构建，未创建新 Release，未执行 build/smoke。
+
+## 19.2 下载入口一致性修复事实
+
+问题根因：安装器 `bootstrapper.cs` 要求 `AI-Cost-Management-Payload.cab` 与
+Setup.exe 同目录（缺失即 exit 1），但官网 3 个下载按钮、Release 正文、资产
+README.txt 均只引导下载 Setup.exe——按官方指引安装必然失败。审计时
+Payload.cab 下载数=0，公开路径无人完成安装。定级 P0。
+
+已完成修复：
+
+- 仓库 3 文件 → commit `faca490`（docs: fix v1.5.5 download instructions）：
+  - `website/index.html`：规格表补 Payload.cab（32,503,105 bytes）；新增三步
+    安装说明（两文件组成 → 同目录 → 运行 Setup.exe）；3 个下载按钮加 title
+    提示（href 未变）。
+  - `README.md`：删除过期 "JSON import tool"，改为 DeepSeek official usage
+    ZIP import。
+  - `RELEASE_NOTES.md`：v1.5.5 节新增 `## Installation` 双文件说明（历史版本
+    零改动）。
+- gh-pages → commit `ef920ed`（docs: fix download instructions for two-file
+  installer），已 push，线上官网生效。
+- GitHub Release v1.5.5：正文 Installation 段改为双文件同目录；资产 README.txt
+  删旧传新（629982578 / 1,216 B → 640030502 / 1,323 B，API 直连核验）。
+- 收口记录提交 → commit `c7d24fb`（docs: record v1.5.5 download fix closeout，
+  3 份文档 +107 行）。
+
+## 19.3 当前 Git 状态
+
+- master：`c7d24fb`，与 origin/master 同步；工作区干净。
+- gh-pages：`ef920ed`，与 origin/gh-pages 同步。
+- 工作区仅剩四个未跟踪规划文档（不入 Git）：PHASE5_RELEASE_READINESS_REVIEW.md、
+  PLANNER_STAGE_AND_TASK_MODEL_DESIGN.md、PROJECT_PROGRESS_TIMELINE.md、
+  PROJECT_WORKING_AGREEMENT.md。
+
+## 19.4 阶段判断（2026-10-14 确认）
+
+- **v1.5.5 Release 阶段完成**（§18.4 的关闭结论维持有效，今日修复属发布后
+  文档级补丁，不重开发布阶段）。
+- **当前阶段：发布后用户验证阶段。**
+- 下一步重点：
+  1. 发布用户验证帖子（V2EX「分享创造」首帖终稿草案已备妥，含双文件安装指引）。
+  2. 收集真实安装反馈。
+  3. 根据反馈决定后续优化方向。
+
+## 19.5 边界（重申，不新增决定）
+
+- 不修改产品代码；不启动 Planner 新功能；不启动 Personalized AI Optimization
+  Engine；不增加 SaaS / 账号 / 企业功能；不修改版本号。
+- 与 §18.5、§17.4 的既有暂缓与方向决定完全一致，本节仅记录今日事实与阶段
+  转入，不扩展。
+
+## 19.6 本节同步边界
+
+- 本轮更新五份文档：本文件 / HANDOFF.md / PROJECT_DAILY_LOG.md /
+  docs/PROJECT_STATUS.md / PROJECT_WORKING_AGREEMENT.md。
+- 未改源码、安装器、schema、测试文件、release/、website/；未执行 build/smoke；
+  收口提交 c7d24fb 为本节记录对象而非本节产物（本节文档更新未 commit，待确认）。
