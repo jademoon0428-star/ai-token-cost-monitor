@@ -238,6 +238,9 @@ AI-Cost-Management-Setup.exe
 ## Package
 AI-Cost-Management-Payload.cab
 
+## Installation
+Download both Setup.exe and Payload.cab and keep them in the same folder before running Setup.exe.
+
 ## Installer SHA256
 AI-Cost-Management-Setup.exe SHA256 verified:
 C8403A4D9276D2636D3EF1844865D5404F8DFB3B3DA24AE2102FA705C5F128EF

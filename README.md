@@ -14,7 +14,7 @@ A local-first application for monitoring AI spending, tracking usage, and findin
 ## Core pages
 
 - **Dashboard** — overview of today's and recent verified spending, cost breakdown by provider/model/day, and attention signals.
-- **Usage** — model, provider, token, and cost usage records, with a full details view and a JSON import tool.
+- **Usage** — model, provider, token, and cost usage records, with a full details view and DeepSeek official usage ZIP import.
 - **Saving** — where spending can be reduced and why.
 - **Budget** — budget monitoring based on verified cost data.
 - **AI Activity** — local AI process/connection detection and history.
