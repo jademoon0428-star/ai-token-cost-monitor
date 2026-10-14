@@ -1566,6 +1566,53 @@ v1.5.5 已完成：**Release、安装包、GitHub Release、官网发布、官�
 
 ---
 
+# 2026-10-14
+
+## 工作目标
+
+Post-v1.5.5 用户验证准备：修复 v1.5.5 下载入口与安装说明一致性问题（审计定级 P0），完成官网 / 仓库 / GitHub Release 三侧同步，并补收口记录。
+
+## 完成内容（按轮次）
+
+### 1. 只读审计（发现 P0）
+
+- 安装器事实核查：`bootstrapper.cs` 读同目录 `AI-Cost-Management-Payload.cab`，缺失即 exit 1（控制台闪退无可见报错）；安装全程不联网。
+- 公开入口核查：官网 3 个下载按钮、Release 正文、资产 README.txt 均只引导 Setup.exe；审计时 Payload.cab 下载数=0、Setup.exe=4——公开路径无人完成安装。
+- 定级 P0：阻塞用户验证首发。
+
+### 2. 修复（仅文档 / 官网静态内容 / Release 文案）
+
+- 仓库 3 文件（`website/index.html` 规格表补 Payload.cab + 安装三步说明 + 3 按钮 title；`README.md` 删过期 "JSON import tool"；`RELEASE_NOTES.md` v1.5.5 补 `## Installation`）→ commit `faca490` docs: fix v1.5.5 download instructions（+26/−4）。
+- gh-pages 同步：临时 worktree 方式（主工作树未切分支）复制 `website/index.html` → 根 `index.html` → commit `ef920ed` docs: fix download instructions for two-file installer（+22/−3），已 push，线上官网生效。
+- GitHub Release v1.5.5（gh CLI 不可用，改用 REST API + git 凭据管理器）：正文 Installation 段改为双文件同目录后运行 Setup.exe；资产 README.txt 删旧传新（629982578 / 1,216 B → 640030502 / 1,323 B，API 直连核验）；Setup.exe / Payload.cab / SHA256SUMS.txt 资产未动，安装包未重建，未创建新 Release。
+
+### 3. 复核与收口记录
+
+- 只读复核 PASS：下载入口 URL 未变、说明齐备、无新增宣传违规、历史版本零改动。
+- 本日志、HANDOFF.md、docs/PROJECT_STATUS.md 完成收口记录更新。
+
+## 验证
+
+- 未执行 build/smoke（文档发布修复，明确不需要）。
+- 未修改任何产品代码 / 安装器 / schema / 测试文件。
+- git：master `faca490`、gh-pages `ef920ed`，均与 origin 同步；工作区仅 4 个未跟踪规划文档。
+
+## 重要决定
+
+1. 采用文档 + 文案修复，不改安装器（不加自解压 / 联网下载，不改变产品行为）。
+2. gh-pages 同步用临时 worktree，避免主工作树切分支带来的工作区扰动。
+3. Release README.txt 用删旧资产 + 上传同名新资产方式替换（GitHub 资产不可变），不属重新上传安装包。
+
+## 下一步
+
+1. 用户验证首发：V2EX「分享创造」首帖终稿草案已备妥（含双文件安装指引），待用户确认发布；发布后 48h 归因窗口收集反馈。
+2. 发布前可选：CDN 刷新后核验线上 README.txt 为 1,323 B 新版；真实走一遍双文件下载 → 安装。
+
+今日工作结束。
+
+
+---
+
 # 工作原则
 
 以后每天结束必须更新：

@@ -1593,3 +1593,62 @@ v1.5.5 已发布，项目进入「发布后运营准备阶段」。
    不启动；Subscription Cost Model 同样维持暂缓。
 5. 已知限制维持原状（lint 435 基线、/costs 与 /connect 无入口、安装包未签名、
    %TEMP% 13 个 smoke 临时目录未清理等），不顺手修复。
+
+## 2026-10-14 下载入口一致性修复收口（v1.5.5 文档级补丁）
+
+### 1. 问题背景（只读审计发现，P0）
+
+- 安装器事实：`bootstrapper.cs` 要求 `AI-Cost-Management-Payload.cab` 与
+  Setup.exe 同目录，缺失即 exit 1（控制台程序闪退，无可见报错）；安装全程
+  不联网，无法自动补下。
+- 但官网 3 个下载按钮、GitHub Release 正文、资产 README.txt 均只引导下载
+  Setup.exe；审计时 Payload.cab 下载数=0、Setup.exe=4，公开路径无人完成安装。
+- 定级 P0：阻塞用户验证首发（下载→安装→激活链路在安装环节被截断）。
+
+### 2. 修复内容（仅文档 / 官网静态内容 / Release 文案，零产品代码）
+
+- master `faca490`（docs: fix v1.5.5 download instructions，3 文件 +26/−4）：
+  - `website/index.html`：规格表补 Payload.cab（32,503,105 bytes）两行；
+    新增 Installation 三步说明（两文件组成 → 同目录 → 运行 Setup.exe）；
+    3 个下载按钮加 title 提示（href 未变）。
+  - `README.md`：删除过期 "JSON import tool"，改为 DeepSeek official
+    usage ZIP import。
+  - `RELEASE_NOTES.md`：v1.5.5 节新增 `## Installation` 双文件同目录说明
+    （历史版本零改动）。
+- gh-pages `ef920ed`（docs: fix download instructions for two-file
+  installer，根目录 index.html +22/−3）—— 采用临时 worktree 同步，主工作树
+  未切分支；线上官网已生效。
+- GitHub Release v1.5.5（未建新 Release、未动安装包资产）：
+  - 正文 Installation 段改为「下载两文件到同一文件夹 → 运行 Setup.exe」
+    （其余段落逐字未动）。
+  - 资产 README.txt 替换：旧 629982578（1,216 B）→ 新 640030502（1,323 B），
+    API 直连下载核验；Setup.exe / Payload.cab / SHA256SUMS.txt 的资产 id
+    与大小均未变，安装包未重新构建。
+  - 提示：浏览器下载链路 CDN 可能短暂缓存旧 README.txt，数分钟内自动刷新。
+
+### 3. 验证与边界
+
+- 只读复核 PASS：下载入口 URL 未变、双文件/同目录/运行步骤齐备、无新增
+  宣传违规表述、历史版本零改动。
+- 未执行 build/smoke（文档发布修复，明确不需要）；未修改
+  app/lib/desktop/installer/schema/测试文件。
+- 残留（不阻塞发帖）：浏览器端到端下载→安装实测仍未做（官网已披露）；
+  官网签名状态仍写 "Not confirmed"（已知事实为未签名）。
+
+### 4. 当前 Git / 发布状态（本节取代上方 §2/§3 的旧状态记录，原文保留作历史）
+
+- master：`faca490`，与 origin/master 同步；工作区干净（仅 4 个约定不入
+  Git 的未跟踪规划文档）。
+- gh-pages：`ef920ed`，与 origin/gh-pages 同步（根目录仅 index.html +
+  styles.css）。
+- Release v1.5.5：正文与 README.txt 已修正；安装包资产未变化。
+
+### 5. 下一次继续工作的起点
+
+1. **用户验证首发**：V2EX「分享创造」首帖终稿草案已完成（含双文件安装
+   指引与三个反馈问题），待用户确认后发布；发布后按 48h 归因窗口收集
+   下载增量与反馈。
+2. 发布前可选走查：CDN 刷新后核验线上 README.txt 为新版（1,323 B）；
+   真实执行一次双文件下载 → 安装。
+3. 其余维持不变：官网动画增强属 post-v1.5.5 另行决策；不启动 SaaS /
+   账号系统 / 企业扩展；优化引擎等真实用户反馈后再评估。
