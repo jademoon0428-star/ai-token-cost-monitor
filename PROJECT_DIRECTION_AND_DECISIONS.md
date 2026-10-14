@@ -351,6 +351,8 @@ Planner 推荐 AI 时不要限制：用户电脑已有 AI、当前会员 AI、�
 - 已发布 ≠ 已提交：`af020f0`…`6305de6` 共 9 个提交仅在本地，未 push、未打 tag、未发布（核对时点为 `5aefeee`、7 个）。
 - 修订 `docs/PROJECT_STATUS.md`、`docs/CHANGELOG.md`、`package.json` 属发布工程（HANDOFF 第十五节§5 / PHASE5 §4-6），**尚无授权，本轮未改**。
 
+状态更新（2026-10-11 发布后；覆盖上方对照表与"当前判断"中的版本表述）：上表为 Batch 1 之前时点记录，已过期。v1.5.5 已完成正式发布——commit `40a0996`、tag `v1.5.5`、已 push、GitHub Release 已创建；package.json/CHANGELOG/PROJECT_STATUS/RELEASE_NOTES 均已更新为 1.5.5 并随该 commit 入库。当前版本状态以 §16 为准，原文保留作历史。
+
 ---
 
 # 9. 2026-10-06 记录：R3.5 Productivity（R3.5-A / R3.5-B）
@@ -1023,3 +1025,207 @@ Planner Advanced service 层权限接入（1–3 已在本批实现并待提交�
 - 长期规则维持不变（单人本地产品方向、不扩范围、不擅自 git 操作、以验证结果为准、
   历史保留；全文见 PROJECT_WORKING_AGREEMENT.md §16 及本文件既有条目），本日工作未触碰任何
   产品范围或技术方向决策。
+
+---
+
+# 16. 2026-10-11 记录：v1.5.5 正式发布完成 + 上线阶段与后续路线
+
+## 16.1 发布事实（已执行完毕）
+
+- commit：`40a0996` release: prepare AI Cost Management v1.5.5。
+- tag：`v1.5.5`（→ `40a0996`）；已 push 至 GitHub `master`；GitHub Release 已创建完成。
+- 正式发布产物：`release\AI-Cost-Management-v1.5.5\`（Setup.exe、Payload.cab、README.txt、
+  SHA256SUMS.txt 四件套）；Installer SHA256 已回填 RELEASE_NOTES。
+- 正式发布链 S1–S9 按授权逐步执行完成（全干净链：重跑 package:desktop → 正式 ddf
+  再生成 + `--check` → makecab → csc Setup → README/SHA256SUMS → SHA 回填 → 收尾清理）；
+  BUILD_ID `lnVtZ1FuHRMtX-YGjTnWQ` 全链一致。
+- 安装验收：Setup 安装成功至 `%LOCALAPPDATA%\AI-Cost-Management\App`；version 1.5.5、
+  BUILD_ID 与构建一致；Launcher 启动成功、本地服务正常；Dashboard / Usage / Planner /
+  Budget / AI Activity 全部 HTTP 200；SQLite 数据目录正常。安装结果保留未卸载。
+- 人工测试：发布版本人工测试已完成，全部 PASS。
+- 上方 §15 收尾补充中的"授权边界（当日终点）"与 §15 之前各节的"待决/未授权"表述
+  已被本节取代（历史保留）；§8 对照表已加发布后状态更新标注。
+
+## 16.2 当前阶段：发布后运营准备阶段
+
+v1.5.5 已发布，产品进入「发布后运营准备阶段」。
+
+下一步重点：
+
+1. 建立产品官网。
+2. 创建产品介绍页面。
+3. 准备用户获取渠道。
+4. 收集真实用户反馈。
+
+明确不提前进入：自动优化引擎开发、Subscription Cost Model 开发、大规模功能扩展。
+
+## 16.3 长期方向记录一：个性化 AI 方案优化引擎（当前不实现）
+
+未来考虑建设「个性化 AI 方案优化引擎」。
+
+目标：根据用户本机 AI 使用情况——使用历史、模型选择、Token 消耗、任务类型、
+成本变化、时间效率——逐步优化：
+
+- 模型组合推荐
+- 免费/付费模型替代建议
+- AI 使用效率分析
+
+当前状态：**v1.5.5 不实现。** 原因：优先完成产品上线和真实用户验证。
+（本条为长期方向记录，不构成立项；启动前须按 §6 检查表与 §16.2 阶段重点单独决策。
+注意与既有红线的关系：推荐/优化不得演变为无依据评分排名——须遵守"不做 AI 排名、
+不做没有依据的评分、不制造虚假精确数据"，且依据只能来自用户本机真实数据。）
+
+## 16.4 长期方向记录二：Subscription Cost Model（当前不进入收尾）
+
+当前产品主要覆盖：
+
+- API Token 成本
+- 模型调用成本
+- 本地检测和分析
+
+暂未完整支持：
+
+- ChatGPT Plus
+- Claude Pro
+- Gemini Advanced
+- GitHub Copilot
+- 其他包月/包年订阅
+
+未来阶段考虑增加 Subscription Cost Model：
+
+- 用户手动录入订阅
+- 自动计算月度 AI 固定成本
+- 与 API 成本合并分析
+- 计算真实 AI 总投入
+
+当前状态：**不进入 v1.5.5 收尾，不排期。**
+
+## 16.5 商业与推广方向记录
+
+- GitHub Release 只是技术发布渠道。
+- 未来用户增长需要：官网、产品介绍文章、AI 社区发布、开发者社区推广、
+  软件目录提交、内容营销。
+- 大型 AI 模型推荐目前不可依赖：ChatGPT / Codex / Gemini 等不会自动知道新软件。
+  需要：官方网站、搜索索引、用户评价、外部文章、社区曝光。
+
+## 16.6 明日工作入口
+
+从「官网建设规划 + 上线推广准备」开始。
+
+不要提前进入：自动优化引擎开发、Subscription Cost Model 开发、大规模功能扩展。
+
+## 16.7 本节同步边界
+
+本节与 HANDOFF 第十九节、DAILY_LOG 2026-10-11、RELEASE_NOTES v1.5.5 Release Status、
+docs/PROJECT_STATUS 同批次同步；仅改这 5 份文档，未改源码、未运行验证命令、
+未执行 git 操作、未新增文档。
+
+# 17. 2026-10-12 记录：官网 MVP 完成 + 方向、宣传边界与协作规则确认
+
+## 17.1 官网 MVP 事实（当日完成）
+
+- 英文静态单页官网位于 `website/`，仅 `index.html` 与 `styles.css` 两个文件。
+  独立静态页面，不是产品功能开发，也不构成新版本发布。
+- 技术约束：系统字体 + 静态 CSS + 语义化 HTML，主体内容不依赖 JavaScript 展示；
+  未新增 npm 依赖、脚本、外部字体/CDN、分析工具、第三方图片。
+- 内容：产品介绍、核心功能、隐私与网络说明、下载入口、FAQ（8 项）。
+  Hero 视觉为明确标注的 UI schematic，非伪造产品截图、非真实用户消费数据。
+- 链接指向已核实的 GitHub 仓库、v1.5.5 Release 与安装程序：
+  `https://github.com/jademoon0428-star/ai-token-cost-monitor/releases/download/v1.5.5/AI-Cost-Management-Setup.exe`
+  Setup.exe SHA256：`C8403A4D9276D2636D3EF1844865D5404F8DFB3B3DA24AE2102FA705C5F128EF`。
+- 本轮未修改产品源码、数据库与发布资产；官网未部署、未提交、未推送。
+
+## 17.2 验证证据（当日执行输出，如实记录）
+
+- 完整性检查：`meta name="description"` 1、`meta property="og:description"` 1、`h1` 1；
+  指定 6 项旧文案全部未命中；新旧文案无并存；HTML 标签配对无异常；12 个 id 无重复。
+- Playwright 360px + 1280px 共 24/24 PASS：无水平溢出、无页面错误、单一 h1、
+  样式表加载正常、FAQ 8 项、键盘可用、下载地址与 SHA-256 显示正确；
+  外部请求列表为空——仅描述该页面浏览器请求，**不得夸大为产品完全不联网**。
+- 未做浏览器 → GitHub 下载端到端验证；**不声称下载流程端到端成功**。
+
+## 17.3 宣传与文案边界（长期约束）
+
+- 禁止声称：开源、永久免费、完全离线、零网络、实时/后台监控、自动阻止超预算消费、
+  推送通知、100% 检测准确、覆盖所有模型、自动成本优化。
+- 隐私表述必须精确区分：未发现上传使用量或成本数据的代码；未发现分析或崩溃报告代码；
+  AI Activity 扫描可能执行反向 DNS 查询；用户主动触发的可选提供商连接测试会联系相应 API。
+- 价格注册表：随当前版本打包的价格信息，不承诺自动或实时更新。
+- API Key 表述：区分无需 API Key 的核心功能与主动触发的可选提供商连接测试。
+- 活动检测 ≠ 实际消费记录：AI Activity 只提供本地活动证据，不是消费记录。
+- 未确认事项不得推断：许可证、最低 Windows 版本、安装包签名、SmartScreen 状态。
+- 宣传证据要求：任何对外数字、链接、校验和与功能描述必须来自可复核的执行输出或官方来源；
+  未验证的流程不得写成已验证。
+
+## 17.4 长期方向（重申，2026-10-12 确认）
+
+- 优先完成 v1.5.5 发布后的收尾：官网、产品介绍页面、用户获取渠道、真实用户反馈收集。
+- 暂缓：个性化 AI 方案优化引擎、反馈闭环、更广泛的资源推荐改进、Subscription Cost Model。
+- 决策标准不变：以实际用户价值、必要性、可验证性为准；不为"可能有用"扩展范围。
+- 保持产品简单、稳定、专业，优先服务个人 AI 用户与小型/细分 AI 使用者，
+  不以企业级复杂度为默认目标；坚持证据优先，避免范围蔓延。
+
+## 17.5 协作规则（重申，2026-10-12 确认）
+
+1. 用户说"下一步/继续"时，优先给出可执行的 OpenCode 任务（明确文件、命令与验收标准）。
+2. 步骤必须适配 Windows PowerShell 环境。
+3. 不做无目的重复检查；已通过的检查在内容未变化时不重复重跑。
+4. 每次项目工作结束必须更新 HANDOFF.md。
+5. 未经授权不得 commit、push、deploy 或改动发布资产；不执行 `git add .` / reset /
+   checkout / stash / clean 等破坏性操作。
+6. 保护既有未提交修改与未跟踪文件：5 M + 4 个未跟踪文档的基线不得被覆盖、重置或清理。
+
+## 17.6 本节同步边界
+
+本节与 HANDOFF 2026-10-12 收工块、DAILY_LOG 2026-10-12、docs/PROJECT_STATUS 官网工作节
+同批次同步；RELEASE_NOTES.md 保留原状（官网工作不写入产品发布说明）。
+本轮未改产品源码、数据库与发布资产，未执行 git 操作，未部署，未新增文档。
+
+---
+
+# 18. 2026-10-13 记录：v1.5.5 发布阶段关闭 + 官网发布与验收
+
+## 18.1 官网发布事实
+
+- GitHub Pages 已上线：https://jademoon0428-star.github.io/ai-token-cost-monitor/
+- 部署方式：**gh-pages 分支根目录部署** `index.html` + `styles.css`
+  （Pages source = gh-pages / root）。
+- master 规范来源：`website/`。
+- **双分支同步约定：`master website/` → `gh-pages root`。**
+
+## 18.2 Git 状态
+
+- master：`5a5c4ad` docs: close out v1.5.5 website launch —— 与 origin/master 同步。
+- 官网入库：`4418e48` docs: add official website static page（master，仅 website 两文件）。
+- gh-pages：`f00057a`、`c196f97` —— 与 origin/gh-pages 同步。
+- （§8 对照表、§16.1 的发布事实不变；本节记录发布后新增的官网提交与分支状态。）
+
+## 18.3 官网验收（PASS，2026-10-13 只读验证）
+
+- 首页 HTTP 200；styles.css HTTP 200，CSS 正常加载；无 404 资源。
+- 下载链接指向 v1.5.5 Release；Release 页面可访问。
+- FAQ 8 项正常；隐私说明正常；产品介绍正常。
+- 宣传边界检查通过（符合 §17.3 长期约束）：**没有声称**
+  「实时监控所有 AI」「自动阻止费用」「支持未实现平台」「自动推荐最佳模型省钱」。
+- 未做浏览器端到端下载测试，不声称（与页面披露口径一致）。
+
+## 18.4 发布阶段关闭
+
+v1.5.5 已完成：**Release、安装包、GitHub Release、官网发布、官网验收、文档收口**。
+§16.2 的「发布后运营准备阶段」自此进入执行期（官网项已闭环）。
+
+## 18.5 后续方向（2026-10-13 确认）
+
+1. **用户验证优先** —— 收集真实用户反馈，作为后续决策依据。
+2. **官网动画演示** —— 属于 post-v1.5.5 官网增强，不纳入当前版本。
+3. **暂不启动 SaaS / 账号系统 / 企业功能** —— 维持 local-first、单机单用户定位
+   （与 §17.4 一致）。
+4. **等真实用户反馈后再评估 Personalized AI Optimization Engine**
+   —— 与 §16.3 暂缓决定一致，不提前启动。
+
+## 18.6 本节同步边界
+
+- 本轮更新五份文档（本文件 / HANDOFF / DAILY_LOG / RELEASE_NOTES / docs/PROJECT_STATUS）；
+  其中 RELEASE_NOTES.md 按用户本次指示做最小补充（v1.5.5 节末新增 Website 小节，
+  不改原发布记录结构），该指示为对 §17.6「RELEASE_NOTES 保留原状」约定的单次覆盖。
+- 未改源码、package.json、release/、website/；未执行 git 操作；未 commit。

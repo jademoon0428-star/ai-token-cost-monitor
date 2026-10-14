@@ -1524,3 +1524,72 @@ v1.5.5 已发布，项目进入「发布后运营准备阶段」。
 - 官网内容维护项：版本发布后需同步页面中的版本号 / 文件大小 / SHA256；
   双分支同步约定（master `website/` → gh-pages 根目录）。
 - 下一步（等待用户决定）：本轮 3 份文档 diff 检查与提交授权；master push 授权。
+
+
+---
+
+## 2026-10-13 v1.5.5 Release Closeout Final Status
+
+### 1. v1.5.5 已完成发布闭环
+
+- 发布事实：commit `40a0996`、tag `v1.5.5`、已 push、GitHub Release 已创建；
+  正式产物四件套在 `release\AI-Cost-Management-v1.5.5\`；Installer SHA256
+  `C8403A4D9276D2636D3EF1844865D5404F8DFB3B3DA24AE2102FA705C5F128EF`
+  已回填 RELEASE_NOTES。
+- 17/17 发布门禁、安装验收、发布版人工测试全部 PASS。
+- 官网（发布收尾最后一项）已上线并验收通过：
+  https://jademoon0428-star.github.io/ai-token-cost-monitor/
+  **v1.5.5 阶段正式关闭。**
+
+  官网验收 PASS 明细（只读验证，2026-10-13）：
+
+  - 首页 HTTP 200
+  - styles.css HTTP 200，CSS 正常加载
+  - 无 404 资源（0 个 src 资源、0 外部 CDN/字体/图片）
+  - 下载链接指向 v1.5.5 Release（Setup.exe 直链 HEAD 200）
+  - Release 页面可访问（200）
+  - FAQ 8 项正常
+  - 隐私说明正常
+  - 产品介绍正常
+  - 宣传边界检查通过：**没有声称**「实时监控所有 AI」「自动阻止费用」
+    「支持未实现平台」「自动推荐最佳模型省钱」
+    （唯一 "real-time monitor" 命中为 FAQ 问句，答案为 No）
+
+  发布阶段关闭清单（v1.5.5 已完成）：
+
+  1. Release（commit `40a0996` + tag `v1.5.5` + push）
+  2. 安装包（`release\AI-Cost-Management-v1.5.5\` 四件套 + SHA256 回填）
+  3. GitHub Release（已创建；安装验收与人工测试 PASS）
+  4. 官网发布（GitHub Pages 上线，gh-pages 分支根目录部署）
+  5. 官网验收（PASS，见上）
+  6. 文档收口（五文档今日同步）
+
+### 2. 当前 master / gh-pages 状态
+
+- master：HEAD `5a5c4ad`（docs: close out v1.5.5 website launch），
+  **与 origin/master 同步**；其上为 `4418e48`（官网页面入库）、
+  `40a0996`（v1.5.5 发布）。
+- gh-pages：HEAD `c196f97`（docs: remove website subdirectory from
+  gh-pages publish tree），**与 origin/gh-pages 同步**，仍指向最新官网发布内容
+  （根目录仅 index.html + styles.css），GitHub Pages 正常提供服务。
+- 官网规范来源：master 的 `website/`；内容更新需双分支同步
+  （master `website/` → gh-pages 根目录）。
+
+### 3. 保留的未提交文档（不要处理）
+
+- 已跟踪未提交 2 项（保持 modified，本轮不处理）：
+  `PROJECT_DIRECTION_AND_DECISIONS.md`、`RELEASE_NOTES.md`
+  （均为历史收尾修改，是否提交由用户另行决定）。
+- 未跟踪 4 项（保持不入 Git，不要处理）：
+  `PHASE5_RELEASE_READINESS_REVIEW.md`、`PLANNER_STAGE_AND_TASK_MODEL_DESIGN.md`、
+  `PROJECT_PROGRESS_TIMELINE.md`、`PROJECT_WORKING_AGREEMENT.md`。
+
+### 4. 下一阶段方向
+
+1. **用户验证** —— 收集真实用户反馈，作为后续一切决策依据。
+2. **官网增强（动画演示）** —— post-v1.5.5 官网增强项，独立于产品版本排期。
+3. **不启动 SaaS / 账号系统 / 企业范围扩展** —— 维持 local-first、单机单用户定位。
+4. **等真实反馈后再评估优化引擎** —— 个性化 AI 方案优化引擎在获得真实用户验证前
+   不启动；Subscription Cost Model 同样维持暂缓。
+5. 已知限制维持原状（lint 435 基线、/costs 与 /connect 无入口、安装包未签名、
+   %TEMP% 13 个 smoke 临时目录未清理等），不顺手修复。

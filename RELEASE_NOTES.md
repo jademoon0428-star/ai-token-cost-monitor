@@ -210,7 +210,7 @@ AI-Cost-Management-Payload.cab
 # AI Cost Management v1.5.5
 
 ## Release Status
-Release Preparation (full 17-item smoke gate passed 17/17 on 2026-10-10; the DeepSeek DB smoke now isolates to a temp database by default — test tooling only, no product data change; read-only release risk review and precondition checks completed; official CAB/Setup/README/SHA256SUMS, installer SHA256 backfill, install validation, and tag are not yet done)
+Released — commit `40a0996` (release: prepare AI Cost Management v1.5.5), tag `v1.5.5`, pushed to GitHub master, GitHub Release created. Full 17-item smoke gate passed 17/17 on 2026-10-10; official artifacts produced in `release\AI-Cost-Management-v1.5.5\` (Setup.exe, Payload.cab, README.txt, SHA256SUMS.txt); installer SHA256 verified (see below); install validation passed (install to %LOCALAPPDATA%\AI-Cost-Management\App, version 1.5.5, BUILD_ID lnVtZ1FuHRMtX-YGjTnWQ, Dashboard/Usage/Planner/Budget/AI Activity HTTP 200, SQLite data directory OK); released-build manual testing all PASS.
 
 ## Version
 1.5.5
@@ -241,3 +241,6 @@ AI-Cost-Management-Payload.cab
 ## Installer SHA256
 AI-Cost-Management-Setup.exe SHA256 verified:
 C8403A4D9276D2636D3EF1844865D5404F8DFB3B3DA24AE2102FA705C5F128EF
+
+## Website
+Official website: https://jademoon0428-star.github.io/ai-token-cost-monitor/ (live). Deployed from the `gh-pages` branch with `index.html` + `styles.css` at the repository root; canonical source is `website/` on `master` (dual-branch sync: `master website/` → `gh-pages` root). Acceptance verification passed: page and stylesheet HTTP 200, no missing resources, the download link targets this v1.5.5 Release, FAQ/privacy/product overview render correctly, and the promotional-claims review passed. Website commits: `4418e48` (master), `f00057a` + `c196f97` (gh-pages).

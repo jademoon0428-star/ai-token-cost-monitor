@@ -1516,7 +1516,52 @@ v1.5.5 官网发布收尾：官网入库、gh-pages 上线、验收与发布阶�
 2. master（`4418e48`）push 授权决定。
 3. 官网后续增强（动画演示等，post-v1.5.5）与推广动作另行决策。
 
-今日工作结束。
+## 2026-10-13 追加：五文档进度同步与阶段关闭（当日最终收尾）
+
+（上方「Git 状态」「重要决定」「下一步」为早前时点记录，由本节更新；原文保留。）
+
+### 官网发布（最终记录）
+
+- GitHub Pages：https://jademoon0428-star.github.io/ai-token-cost-monitor/
+- 部署方式：gh-pages 分支根目录部署 `index.html` + `styles.css`。
+- master 规范来源：`website/`。
+- 双分支同步约定：`master website/` → `gh-pages root`。
+
+### Git 状态（最终）
+
+- master：`5a5c4ad` docs: close out v1.5.5 website launch —— **与 origin/master 同步**。
+- 官网入库：`4418e48` docs: add official website static page。
+- gh-pages：`f00057a`、`c196f97` —— **与 origin/gh-pages 同步**，仍指向最新官网发布内容。
+
+### 官网验收（PASS 汇总）
+
+- 首页 HTTP 200；styles.css HTTP 200；CSS 正常加载；无 404 资源。
+- 下载链接指向 v1.5.5 Release；Release 页面可访问。
+- FAQ 8 项正常；隐私说明正常；产品介绍正常。
+- 宣传边界检查通过：**没有声称**「实时监控所有 AI」「自动阻止费用」
+  「支持未实现平台」「自动推荐最佳模型省钱」。
+
+### 发布阶段关闭
+
+v1.5.5 已完成：**Release、安装包、GitHub Release、官网发布、官网验收、文档收口**。
+
+### 后续方向
+
+- 用户验证优先。
+- 官网动画演示属于 post-v1.5.5 官网增强。
+- 暂不启动 SaaS / 账号系统 / 企业功能。
+- 等真实用户反馈后再评估 Personalized AI Optimization Engine。
+
+### 本轮更新范围与决定
+
+- 更新五份文档：本文件 / HANDOFF.md / PROJECT_DIRECTION_AND_DECISIONS.md /
+  RELEASE_NOTES.md / docs/PROJECT_STATUS.md。
+- RELEASE_NOTES.md 按用户 2026-10-13 本次指示做**最小补充**（v1.5.5 节末新增
+  Website 小节，不改原发布记录结构）——该指示覆盖上方「重要决定」中
+  "RELEASE_NOTES 不写入官网记录"的旧约定记录（原文保留作历史）。
+- 未改源码、package.json、release/、website/；未 commit。
+
+今日工作结束（第二次）。
 
 
 ---
